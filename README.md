@@ -25,7 +25,7 @@ The tests use the engine's platform discovery, editor builder loader and editor 
 
 ## Native Android project
 
-Open `android/` in Android Studio. The project targets `arm64-v8a` devices and `x86_64` emulators, with minimum API 26 and compile/target API 35. It packages `libhelengine_android.so` as a `NativeActivity`. The activity logs window creation and destruction to `HelengineAndroid`; it does not render a scene or load game content.
+Open `android/` in Android Studio. The project targets `arm64-v8a` devices and `x86_64` emulators, with minimum API 26 and compile/target API 35. It packages `libhelengine_android.so` as a `NativeActivity`. The activity presents an opaque cornflower-blue boot frame and logs window creation and destruction to `HelengineAndroid`. It repaints when Android resizes or invalidates the surface; it does not render a scene or load game content.
 
 The pinned toolchain is Android Gradle Plugin 8.11.1, Gradle 8.14.3, JDK 17, Android SDK platform 35, SDK Build Tools 35.0.0, NDK 27.0.12077973 and SDK CMake 3.22.1. The checked-in Gradle wrapper verifies the official Gradle distribution checksum. AGP's [compatibility documentation](https://developer.android.com/build/releases/agp-8-11-0-release-notes) specifies Gradle 8.13 or newer and JDK 17. NDK r27's flexible page-size option is enabled according to the [native page-size documentation](https://developer.android.com/guide/practices/page-sizes).
 
@@ -55,6 +55,6 @@ adb shell am start -W -n com.helengine.android.scaffold/android.app.NativeActivi
 adb logcat -d -s HelengineAndroid:I
 ```
 
-Select a device with `adb -s <serial>` when more than one is connected. Expected log messages are `Android native host scaffold started.` and `Native window ready; rendering is pending.` The app should stay running without a native crash. A scene is not rendered at this milestone.
+Select a device with `adb -s <serial>` when more than one is connected. Expected log messages are `Android native host scaffold started.`, `Native window ready.`, and `Blue boot frame presented:` followed by the surface dimensions. The native surface should be blue and the app should stay running without a native crash. A scene is not rendered at this milestone.
 
-Validated on 2026-10-13: the debug APK passed signing, both ABI/entry-point checks, and 16 KB alignment checks. An Android 35 AOSP x86-64 emulator installed and launched it successfully; removing its task produced the native window-release and activity-destruction callbacks. ARM64 was compiled and inspected but was not boot-tested. Local package and boot evidence is in `builds/helengine-android/native-host/output/` and lifecycle logs are in `native-host/boot/`.
+Validated on 2026-10-13: the debug APK passed signing, both ABI/entry-point checks, and 16 KB alignment checks. An Android 35 AOSP x86-64 emulator installed and launched it successfully; Android accepted the blue boot frame at 1080×1920, and removing its task produced the native window-release and activity-destruction callbacks. ARM64 was compiled and inspected but was not boot-tested. Local package and boot evidence is in `builds/helengine-android/native-host/output/` and lifecycle logs are in `native-host/boot/`.
