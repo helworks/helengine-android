@@ -4,7 +4,7 @@ Publishes the Android metadata builder and registers it with a source editor che
 .DESCRIPTION
 Preserves other platform entries and updates Android entries for the selected engine version.
 When EngineVersion is omitted, registers every engine version already present in the registry.
-Registration does not require an Android SDK and does not enable game export.
+Registration does not require an Android SDK; game export requires the configured native toolchain.
 #>
 [CmdletBinding()]
 param(

@@ -1,4 +1,5 @@
 #include "AndroidVulkanSwapchain.hpp"
+#include "vulkan_memory.hpp"
 #include "vulkan_check.hpp"
 
 #include <android/log.h>
@@ -68,7 +69,11 @@ namespace helengine::android {
         swapchain.imageArrayLayers = 1;
         swapchain.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
         swapchain.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-        swapchain.preTransform = capabilities.currentTransform;
+        // Vertices and image dimensions use Android's logical window orientation. The compositor owns display rotation.
+        if (!(capabilities.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR)) {
+            throw std::runtime_error("Android logical-orientation presentation requires the identity surface transform.");
+        }
+        swapchain.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
         swapchain.compositeAlpha = alpha;
         swapchain.presentMode = VK_PRESENT_MODE_FIFO_KHR;
         swapchain.clipped = VK_TRUE;
@@ -101,6 +106,49 @@ namespace helengine::android {
         render_pass.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
         render_pass.attachmentCount = 1;
         render_pass.pAttachments = &color;
+#if HELENGINE_ANDROID_GAME
+        VkFormatProperties depthProperties{};
+        vkGetPhysicalDeviceFormatProperties(Device.GetPhysicalDevice(), VK_FORMAT_D32_SFLOAT, &depthProperties);
+        if (!(depthProperties.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT)) {
+            throw std::runtime_error("Android renderer requires D32 depth attachments.");
+        }
+        VkImageCreateInfo depthImage{};
+        depthImage.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        depthImage.imageType = VK_IMAGE_TYPE_2D;
+        depthImage.format = VK_FORMAT_D32_SFLOAT;
+        depthImage.extent = {Extent.width, Extent.height, 1};
+        depthImage.mipLevels = 1;
+        depthImage.arrayLayers = 1;
+        depthImage.samples = VK_SAMPLE_COUNT_1_BIT;
+        depthImage.tiling = VK_IMAGE_TILING_OPTIMAL;
+        depthImage.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+        check_vulkan(vkCreateImage(Device.GetDevice(), &depthImage, nullptr, &DepthImage), "vkCreateImage(depth)");
+        DepthMemory = AllocateImageMemory(Device, DepthImage);
+        VkImageViewCreateInfo depthView{};
+        depthView.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        depthView.image = DepthImage;
+        depthView.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        depthView.format = depthImage.format;
+        depthView.subresourceRange = {VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1};
+        check_vulkan(vkCreateImageView(Device.GetDevice(), &depthView, nullptr, &DepthView), "vkCreateImageView(depth)");
+        VkAttachmentDescription attachments[2]{color, {}};
+        attachments[1].format = depthImage.format;
+        attachments[1].samples = VK_SAMPLE_COUNT_1_BIT;
+        attachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        attachments[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        attachments[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        attachments[1].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        attachments[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        VkAttachmentReference depthAttachment{1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
+        subpass.pDepthStencilAttachment = &depthAttachment;
+        render_pass.attachmentCount = 2;
+        render_pass.pAttachments = attachments;
+        dependency.srcStageMask |= VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+        dependency.dstStageMask |= VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+        dependency.srcAccessMask |= VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        dependency.dstAccessMask |= VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+#endif
         render_pass.subpassCount = 1;
         render_pass.pSubpasses = &subpass;
         render_pass.dependencyCount = 1;
@@ -125,6 +173,11 @@ namespace helengine::android {
             framebuffer.renderPass = RenderPass;
             framebuffer.attachmentCount = 1;
             framebuffer.pAttachments = &ImageViews[image];
+#if HELENGINE_ANDROID_GAME
+            VkImageView framebufferViews[2]{ImageViews[image], DepthView};
+            framebuffer.attachmentCount = 2;
+            framebuffer.pAttachments = framebufferViews;
+#endif
             framebuffer.width = Extent.width;
             framebuffer.height = Extent.height;
             framebuffer.layers = 1;
@@ -134,6 +187,8 @@ namespace helengine::android {
             check_vulkan(vkCreateSemaphore(Device.GetDevice(), &semaphore, nullptr, &RenderFinished[image]), "vkCreateSemaphore");
         }
         __android_log_print(ANDROID_LOG_INFO, "HelengineAndroid", "Vulkan swapchain created: %ux%u, %u images.", Extent.width, Extent.height, image_count);
+        __android_log_print(ANDROID_LOG_INFO, "HelengineAndroid", "Vulkan logical window orientation: currentTransform=%u presentationTransform=%u.",
+            capabilities.currentTransform, swapchain.preTransform);
     }
 
     void AndroidVulkanSwapchain::Reset() {
@@ -141,6 +196,12 @@ namespace helengine::android {
         for (auto framebuffer : Framebuffers) if (framebuffer != VK_NULL_HANDLE) vkDestroyFramebuffer(device, framebuffer, nullptr);
         for (auto view : ImageViews) if (view != VK_NULL_HANDLE) vkDestroyImageView(device, view, nullptr);
         for (auto semaphore : RenderFinished) if (semaphore != VK_NULL_HANDLE) vkDestroySemaphore(device, semaphore, nullptr);
+        if (DepthView != VK_NULL_HANDLE) vkDestroyImageView(device, DepthView, nullptr);
+        if (DepthImage != VK_NULL_HANDLE) vkDestroyImage(device, DepthImage, nullptr);
+        if (DepthMemory != VK_NULL_HANDLE) vkFreeMemory(device, DepthMemory, nullptr);
+        DepthView = VK_NULL_HANDLE;
+        DepthImage = VK_NULL_HANDLE;
+        DepthMemory = VK_NULL_HANDLE;
         if (RenderPass != VK_NULL_HANDLE) vkDestroyRenderPass(device, RenderPass, nullptr);
         if (Swapchain != VK_NULL_HANDLE) vkDestroySwapchainKHR(device, Swapchain, nullptr);
         Framebuffers.clear();

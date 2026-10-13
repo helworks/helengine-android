@@ -7,7 +7,7 @@
 
 namespace helengine::android {
     AndroidVulkanRenderer::AndroidVulkanRenderer(AAssetManager* assets)
-        : Assets(assets), Device(), Swapchain(Device), Pipeline(Device) {
+        : Assets(assets), Device(), Swapchain(Device), Pipeline(Device), SceneGpu(Device) {
         if (Assets == nullptr) throw std::invalid_argument("Android asset manager is required.");
     }
 
@@ -15,6 +15,7 @@ namespace helengine::android {
         // Destruction cannot propagate a device-loss exception across the native activity boundary.
         if (Device.IsInitialized()) vkDeviceWaitIdle(Device.GetDevice());
         Pipeline.Reset();
+        SceneGpu.ResetPipelines();
         Swapchain.Reset();
         if (Surface != VK_NULL_HANDLE) vkDestroySurfaceKHR(Device.GetInstance(), Surface, nullptr);
     }
@@ -32,7 +33,11 @@ namespace helengine::android {
         check_vulkan(vkGetPhysicalDeviceSurfaceSupportKHR(Device.GetPhysicalDevice(), Device.GetQueueFamily(), Surface, &supported), "vkGetPhysicalDeviceSurfaceSupportKHR");
         if (!supported) throw std::runtime_error("Selected Vulkan queue cannot present to the replacement Android surface.");
         Swapchain.Initialize(Surface, Window, ContentExtent);
+#if HELENGINE_ANDROID_GAME
+        SceneGpu.Initialize(Assets, Swapchain);
+#else
         Pipeline.Initialize(Assets, Swapchain);
+#endif
         WindowReady = true;
     }
 
@@ -40,6 +45,7 @@ namespace helengine::android {
         WindowReady = false;
         Device.WaitIdle();
         Pipeline.Reset();
+        SceneGpu.ResetPipelines();
         Swapchain.Reset();
         if (Surface != VK_NULL_HANDLE) vkDestroySurfaceKHR(Device.GetInstance(), Surface, nullptr);
         Surface = VK_NULL_HANDLE;
@@ -51,16 +57,23 @@ namespace helengine::android {
         WindowReady = false;
         Device.WaitIdle();
         Pipeline.Reset();
+        SceneGpu.ResetPipelines();
         Swapchain.Reset();
         Swapchain.Initialize(Surface, Window, ContentExtent);
+#if HELENGINE_ANDROID_GAME
+        SceneGpu.Initialize(Assets, Swapchain);
+#else
         Pipeline.Initialize(Assets, Swapchain);
+#endif
         WindowReady = true;
     }
 
     void AndroidVulkanRenderer::Resize() {
         if (Surface == VK_NULL_HANDLE) throw std::logic_error("Cannot resize Vulkan without an attached native window.");
         RecreateSwapchain();
+#if !HELENGINE_ANDROID_GAME
         DrawFrame();
+#endif
     }
 
     void AndroidVulkanRenderer::SetContentExtent(std::uint32_t width, std::uint32_t height) {
@@ -82,6 +95,9 @@ namespace helengine::android {
         const VkFence fence = Device.GetFrameFence();
         const auto timeout = std::numeric_limits<std::uint64_t>::max();
         check_vulkan(vkWaitForFences(device, 1, &fence, VK_TRUE, timeout), "vkWaitForFences");
+#if HELENGINE_ANDROID_GAME
+        SceneGpu.Prepare(SceneBatches);
+#endif
         std::uint32_t image = 0;
         VkResult acquisition = vkAcquireNextImageKHR(device, Swapchain.GetSwapchain(), timeout, Device.GetImageAvailable(), VK_NULL_HANDLE, &image);
         if (acquisition == VK_ERROR_OUT_OF_DATE_KHR) {
@@ -106,10 +122,22 @@ namespace helengine::android {
         render.framebuffer = Swapchain.GetFramebuffer(image);
         render.renderArea.extent = Swapchain.GetExtent();
         render.clearValueCount = 1;
+#if HELENGINE_ANDROID_GAME
+        VkClearValue clears[2]{};
+        clears[0].color = ClearColor;
+        clears[1].depthStencil = {1, 0};
+        render.clearValueCount = 2;
+        render.pClearValues = clears;
+#else
         render.pClearValues = &clear;
+#endif
         vkCmdBeginRenderPass(command, &render, VK_SUBPASS_CONTENTS_INLINE);
+#if HELENGINE_ANDROID_GAME
+        SceneGpu.Record(command, SceneBatches);
+#else
         vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_GRAPHICS, Pipeline.GetPipeline());
         vkCmdDraw(command, 3, 1, 0, 0);
+#endif
         vkCmdEndRenderPass(command);
         check_vulkan(vkEndCommandBuffer(command), "vkEndCommandBuffer");
         const VkSemaphore acquire = Device.GetImageAvailable();
@@ -136,10 +164,21 @@ namespace helengine::android {
         present.pImageIndices = &image;
         const VkResult result = vkQueuePresentKHR(Device.GetQueue(), &present);
         if (result != VK_ERROR_OUT_OF_DATE_KHR && result != VK_SUBOPTIMAL_KHR) check_vulkan(result, "vkQueuePresentKHR");
-        if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || acquisition == VK_SUBOPTIMAL_KHR) {
+        // Logical-orientation presentation can remain suboptimal relative to Android's preferred pre-rotation.
+        // A suboptimal swapchain is drawable; native window/content callbacks own extent changes.
+        if (result == VK_ERROR_OUT_OF_DATE_KHR) {
             RecreateSwapchain();
         } else {
+#if HELENGINE_ANDROID_GAME
+            if ((PresentedFrames++ % 120) == 0) {
+                std::size_t vertices = 0;
+                for (const auto& batch : SceneBatches) vertices += batch.Vertices.size();
+                __android_log_print(ANDROID_LOG_INFO, "HelengineAndroid", "Vulkan scene frame presented: frame=%llu, %ux%u, batches=%zu vertices=%zu.",
+                    static_cast<unsigned long long>(PresentedFrames), Swapchain.GetExtent().width, Swapchain.GetExtent().height, SceneBatches.size(), vertices);
+            }
+#else
             __android_log_print(ANDROID_LOG_INFO, "HelengineAndroid", "Vulkan triangle frame presented: %ux%u.", Swapchain.GetExtent().width, Swapchain.GetExtent().height);
+#endif
         }
     }
 }

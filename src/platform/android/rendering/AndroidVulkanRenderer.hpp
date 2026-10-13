@@ -3,6 +3,7 @@
 #include "AndroidVulkanDevice.hpp"
 #include "AndroidVulkanSwapchain.hpp"
 #include "AndroidVulkanPipeline.hpp"
+#include "AndroidSceneGpu.hpp"
 
 namespace helengine::android {
     /// Presents the native Vulkan probe while keeping device and surface ownership separate across Android lifecycle events.
@@ -26,6 +27,14 @@ namespace helengine::android {
         void SetContentExtent(std::uint32_t width, std::uint32_t height);
         /// Draws and presents the diagnostic triangle with a single serialized frame in flight.
         void DrawFrame();
+        /// Returns current pixel dimensions for engine window and camera layout.
+        VkExtent2D GetExtent() const { return Swapchain.GetExtent(); }
+        /// Removes the preceding engine frame's queued geometry before collecting the next draw.
+        void BeginSceneFrame() { SceneBatches.clear(); }
+        /// Appends one authored drawable's triangles in render-queue order.
+        void Submit(SceneBatch batch) { SceneBatches.push_back(std::move(batch)); }
+        /// Uses the active scene camera's clear color for game frames.
+        void SetClearColor(float r, float g, float b, float a) { ClearColor = {{r,g,b,a}}; }
 
     private:
         /// Recreates the swapchain and its graphics pipeline while preserving the device and surface.
@@ -40,6 +49,14 @@ namespace helengine::android {
         AndroidVulkanSwapchain Swapchain;
         /// Probe graphics pipeline compatible with the current swapchain.
         AndroidVulkanPipeline Pipeline;
+        /// Persistent geometry and image resources for authored scenes.
+        AndroidSceneGpu SceneGpu;
+        /// Ordered geometry gathered by the engine's 3D and 2D render visitors.
+        std::vector<SceneBatch> SceneBatches;
+        /// Active camera clear color in the engine's color convention.
+        VkClearColorValue ClearColor{{100.0f/255,149.0f/255,237.0f/255,1}};
+        /// Number of successfully presented game frames, used for bounded diagnostics.
+        std::uint64_t PresentedFrames = 0;
         /// Vulkan surface bound to the live native window.
         VkSurfaceKHR Surface = VK_NULL_HANDLE;
         /// Borrowed Android window valid until the native-window destruction callback completes.

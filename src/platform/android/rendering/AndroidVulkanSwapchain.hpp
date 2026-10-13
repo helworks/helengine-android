@@ -50,5 +50,11 @@ namespace helengine::android {
         std::vector<VkFramebuffer> Framebuffers;
         /// Per-image semaphores safely reused after that image is reacquired.
         std::vector<VkSemaphore> RenderFinished;
+        /// Serialized depth target shared by framebuffers; the host allows only one frame in flight.
+        VkImage DepthImage = VK_NULL_HANDLE;
+        /// Memory backing the surface-sized depth image.
+        VkDeviceMemory DepthMemory = VK_NULL_HANDLE;
+        /// View bound to the depth attachment of game framebuffers.
+        VkImageView DepthView = VK_NULL_HANDLE;
     };
 }

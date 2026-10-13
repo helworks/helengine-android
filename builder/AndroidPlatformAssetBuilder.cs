@@ -8,14 +8,9 @@ using helengine.baseplatform.Results;
 namespace helengine.android.builder;
 
 /// <summary>
-/// Makes Android discoverable as an editor platform and explicitly rejects unfinished export operations.
+/// Registers Android and packages generated gameplay with the native Vulkan player.
 /// </summary>
 public sealed class AndroidPlatformAssetBuilder : IPlatformAssetBuilder {
-    /// <summary>
-    /// Explains the currently implemented milestone whenever a caller requests game export.
-    /// </summary>
-    public const string ExportPendingMessage = "Android game export is not implemented. This platform currently provides editor registration and a native host scaffold.";
-
     /// <summary>
     /// Initializes the metadata-only builder without requiring the Android SDK or NDK.
     /// </summary>
@@ -24,7 +19,7 @@ public sealed class AndroidPlatformAssetBuilder : IPlatformAssetBuilder {
             "helengine.android.builder", "0.1.0", "android",
             new EngineCompatibilityRange("1.0.0", "999.0.0"),
             new ManifestCompatibilityRange(1, 3),
-            ["android"], ["debug", "release"]);
+            ["android"], ["debug"]);
         Definition = AndroidPlatformDefinitionFactory.Create();
     }
 
@@ -39,24 +34,42 @@ public sealed class AndroidPlatformAssetBuilder : IPlatformAssetBuilder {
     public PlatformDefinition Definition { get; }
 
     /// <summary>
-    /// Rejects material cooking until an Android rendering backend defines its runtime payloads.
+    /// Cooks an untextured standard material into the Vulkan player's explicit color and lighting payload.
     /// </summary>
     /// <param name="request">Material requested by the editor cook pipeline.</param>
-    /// <returns>No cooked payload is produced by this scaffold.</returns>
-    /// <exception cref="NotSupportedException">Android material cooking has not been implemented.</exception>
+    /// <returns>Serialized platform material bytes with no authored shader dependency.</returns>
+    /// <exception cref="NotSupportedException">The schema or textured material lies outside the current renderer capabilities.</exception>
     public PlatformMaterialCookResult CookMaterial(PlatformMaterialCookRequest request) {
         ArgumentNullException.ThrowIfNull(request);
-        throw new NotSupportedException(ExportPendingMessage);
+        if (request.TargetPlatformId != "android" || request.SchemaId != "standard-shader") {
+            throw new NotSupportedException("Android supports the standard-shader material schema only.");
+        }
+        string color = request.FieldValues.TryGetValue("base-color", out string value) ? value : "#ffffff";
+        if (!color.StartsWith('#') || (color.Length != 7 && color.Length != 9)) {
+            throw new InvalidOperationException("Android base color must use #RRGGBB or #RRGGBBAA.");
+        }
+        if (request.FieldValues.TryGetValue("texture-id", out string texture) && !string.IsNullOrWhiteSpace(texture)) {
+            throw new NotSupportedException("Android 3D textured materials are not implemented yet.");
+        }
+        var material = new global::helengine.PlatformMaterialAsset {
+            Id = request.MaterialAssetId, RendererFamilyId = "android-native", Lit = true,
+            BaseColorR = Convert.ToByte(color.Substring(1, 2), 16),
+            BaseColorG = Convert.ToByte(color.Substring(3, 2), 16),
+            BaseColorB = Convert.ToByte(color.Substring(5, 2), 16),
+            BaseColorA = color.Length == 9 ? Convert.ToByte(color.Substring(7, 2), 16) : (byte)255,
+            TextureRelativePath = string.Empty
+        };
+        return new PlatformMaterialCookResult(global::helengine.files.AssetSerializer.SerializeToBytes(material), []);
     }
 
     /// <summary>
-    /// Rejects game export so a scaffold cannot be mistaken for a successful Android package build.
+    /// Packages cooked authored content with the generated native runtime and verifies the resulting debug APK.
     /// </summary>
     /// <param name="request">Resolved project build request.</param>
     /// <param name="progressReporter">Receiver for build progress.</param>
     /// <param name="diagnosticReporter">Receiver for build diagnostics.</param>
     /// <param name="cancellationToken">Cancellation requested by the editor.</param>
-    /// <returns>A failed task explaining the pending exporter implementation.</returns>
+    /// <returns>Successful report only after native compilation, signing, asset packaging, and alignment checks.</returns>
     public Task<PlatformBuildReport> BuildAsync(
         PlatformBuildRequest request,
         IPlatformBuildProgressReporter progressReporter,
@@ -66,6 +79,6 @@ public sealed class AndroidPlatformAssetBuilder : IPlatformAssetBuilder {
         ArgumentNullException.ThrowIfNull(progressReporter);
         ArgumentNullException.ThrowIfNull(diagnosticReporter);
         cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromException<PlatformBuildReport>(new NotSupportedException(ExportPendingMessage));
+        return AndroidBuildWorkspace.BuildAsync(request, progressReporter, cancellationToken);
     }
 }

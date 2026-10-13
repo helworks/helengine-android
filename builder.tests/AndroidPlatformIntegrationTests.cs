@@ -40,7 +40,7 @@ public sealed class AndroidPlatformIntegrationTests {
             var builder = new EditorPlatformAssetBuilderLoader().Load(descriptor.BuilderAssemblyPath);
             EditorPlatformBuildSelectionModel selection = EditorPlatformBuildSelectionModel.From(builder.Definition);
             Assert.Equal(descriptor.Id, selection.PlatformId);
-            Assert.Equal(new[] { "debug", "release" }, selection.BuildProfiles.Select(profile => profile.ProfileId));
+            Assert.Equal(new[] { "debug" }, selection.BuildProfiles.Select(profile => profile.ProfileId));
             Assert.All(selection.BuildProfiles, profile => {
                 Assert.Contains(selection.GraphicsProfiles, graphics => graphics.ProfileId == profile.GraphicsProfileId);
                 Assert.Contains(selection.CodegenProfiles, codegen => codegen.ProfileId == profile.CodegenProfileId);
@@ -55,7 +55,7 @@ public sealed class AndroidPlatformIntegrationTests {
     /// Confirms the builder refuses to report an unfinished Android game export as successful.
     /// </summary>
     [Fact]
-    public async Task GameExportFailsWithScaffoldDiagnostic() {
+    public async Task GameExportRequiresGeneratedCoreBeforeWritingOutputs() {
         PlatformBuildManifest manifest = new(
             1, "game", "1.0.0", "1.0.0", "android", "0.1.0", string.Empty,
             [], [], [], [], [], new PlatformContainerWritePlan(string.Empty, []), [],
@@ -66,11 +66,11 @@ public sealed class AndroidPlatformIntegrationTests {
             [new PlatformCookProfile("debug", "Debug", new PlatformCookProfileCapabilities(
                 "android-native", "pending", "pending", "pending", PlatformSerializationEndianness.LittleEndian))],
             Path.Combine(AppContext.BaseDirectory, "unused-output"),
-            Path.Combine(AppContext.BaseDirectory, "unused-working"));
+            Path.Combine(AppContext.BaseDirectory, "unused-working"), "debug", "android-native", "default", null, null, null);
         AndroidPlatformAssetBuilder builder = new();
-        NotSupportedException error = await Assert.ThrowsAsync<NotSupportedException>(() => builder.BuildAsync(
+        InvalidOperationException error = await Assert.ThrowsAsync<InvalidOperationException>(() => builder.BuildAsync(
             request, new AndroidBuildReporter(), new AndroidBuildReporter(), CancellationToken.None));
-        Assert.Equal(AndroidPlatformAssetBuilder.ExportPendingMessage, error.Message);
+        Assert.Contains("editor-generated native core", error.Message);
         Assert.False(Directory.Exists(request.OutputRoot));
     }
 
@@ -78,10 +78,27 @@ public sealed class AndroidPlatformIntegrationTests {
     /// Confirms material cooking fails explicitly rather than emitting an unusable runtime payload.
     /// </summary>
     [Fact]
-    public void MaterialCookingFailsWithScaffoldDiagnostic() {
+    public void MaterialCookingRejectsUnsupportedSchemas() {
         PlatformMaterialCookRequest request = new(
             "material", "materials/test.hmat", "android", "debug", "android-native", "", new Dictionary<string, string>());
         NotSupportedException error = Assert.Throws<NotSupportedException>(() => new AndroidPlatformAssetBuilder().CookMaterial(request));
-        Assert.Equal(AndroidPlatformAssetBuilder.ExportPendingMessage, error.Message);
+        Assert.Contains("standard-shader", error.Message);
+    }
+
+    /// <summary>Proves authored color bytes survive platform cooking and shader artifacts are not requested by the fixed Vulkan standard path.</summary>
+    [Fact]
+    public void MaterialCookingPreservesAuthoredColor() {
+        var request = new PlatformMaterialCookRequest("material", "materials/test.hmat", "android", "debug", "android-native", "standard-shader",
+            new Dictionary<string, string> { ["base-color"] = "#12345678" });
+        var result = new AndroidPlatformAssetBuilder().CookMaterial(request);
+        using var stream = new MemoryStream(result.CookedMaterialBytes);
+        var asset = Assert.IsType<global::helengine.PlatformMaterialAsset>(global::helengine.files.AssetSerializer.Deserialize(stream));
+        Assert.Equal("android-native", asset.RendererFamilyId);
+        Assert.Equal(0x12, asset.BaseColorR);
+        Assert.Equal(0x34, asset.BaseColorG);
+        Assert.Equal(0x56, asset.BaseColorB);
+        Assert.Equal(0x78, asset.BaseColorA);
+        Assert.True(asset.Lit);
+        Assert.Empty(result.ReferencedShaderDependencies);
     }
 }

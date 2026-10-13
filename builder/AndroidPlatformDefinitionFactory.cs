@@ -17,23 +17,30 @@ public static class AndroidPlatformDefinitionFactory {
             "Android",
             [
                 new PlatformBuildProfileDefinition(
-                    "debug", "Debug", "Android scaffold; game export is pending.",
-                    "android-native", "default", []),
-                new PlatformBuildProfileDefinition(
-                    "release", "Release", "Android scaffold; game export and signing are pending.",
+                    "debug", "Debug APK", "Native Vulkan player packaged with debug signing.",
                     "android-native", "default", [])
             ],
             [
                 new PlatformGraphicsProfileDefinition(
-                    "android-native", "Vulkan (Native Host)",
-                    "Vulkan native host probe. Authored scene rendering is pending.", [])
+                    "android-native", "Vulkan",
+                    "Native scene rendering with untextured directional-lit meshes and 2D overlays.", [
+                        new PlatformSettingDefinition("screen-orientation", "Screen Orientation", PlatformSettingKind.Choice,
+                            "unspecified", true, ["unspecified", "portrait", "landscape"])
+                    ])
             ],
-            [],
-            [],
+            [new PlatformAssetRequirementDefinition("scene", "Scene", true, ["helen"])],
+            [new PlatformMaterialSchemaDefinition("standard-shader", "Standard Material", ["android-native"], [
+                new PlatformMaterialFieldDefinition("base-color", "Base Color", PlatformMaterialFieldKind.Color, "#ffffff", false, []),
+                new PlatformMaterialFieldDefinition("texture-id", "Texture", PlatformMaterialFieldKind.AssetReference, "", false, []),
+                new PlatformMaterialFieldDefinition("shader-asset-id", "Shader", PlatformMaterialFieldKind.AssetReference, "", false, []),
+                new PlatformMaterialFieldDefinition("vertex-program", "Vertex Program", PlatformMaterialFieldKind.Text, "", false, []),
+                new PlatformMaterialFieldDefinition("pixel-program", "Pixel Program", PlatformMaterialFieldKind.Text, "", false, []),
+                new PlatformMaterialFieldDefinition("variant", "Variant", PlatformMaterialFieldKind.Text, "", false, [])
+            ])],
             [],
             [
                 new PlatformCodegenProfileDefinition(
-                    "default", "Native C++", "Reserved for the Android 64-bit runtime integration.",
+                    "default", "Native C++", "Generated Android 64-bit engine and gameplay runtime.",
                     PlatformCodegenLanguage.Cpp,
                     PlatformSerializationEndianness.LittleEndian,
                     [
@@ -43,10 +50,19 @@ public static class AndroidPlatformDefinitionFactory {
                         new PlatformSettingDefinition(
                             "codegen-use-rtti", "Use Compiler RTTI", PlatformSettingKind.Boolean,
                             "true", true, []),
+                        new PlatformSettingDefinition("generated-math-convention", "Math Convention", PlatformSettingKind.Text,
+                            "native-column-vector", true, []),
+                        new PlatformSettingDefinition("type-remaps", "Numeric Types", PlatformSettingKind.Text,
+                            "System.Numerics.Vector2=helengine.float2;System.Numerics.Vector3=helengine.float3;System.Numerics.Vector4=helengine.float4;System.Numerics.Quaternion=helengine.float4", true, []),
+                        new PlatformSettingDefinition(PlatformCodegenSettingIds.EnabledFeatures, "Runtime Features", PlatformSettingKind.Text,
+                            "host_file_system", true, []),
                         new PlatformSettingDefinition(
                             "codegen-use-exceptions", "Use C++ Exceptions", PlatformSettingKind.Boolean,
                             "true", true, [])
                     ])
-            ]);
+            ],
+            [new PlatformStorageProfileDefinition("apk-assets", "APK Assets", PlatformStorageProfileKind.LooseFiles, "android-vulkan-apk", false)],
+            [new PlatformMediaProfileDefinition("android-apk", "Android APK", PlatformMediaLayoutKind.InstallTree, false, true)],
+            new RuntimeGenerationContract(RuntimeMaterialResolutionMode.CookedPlatformOwned, true, PackagedPathPolicy.ContentRelativeOnly));
     }
 }

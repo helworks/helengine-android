@@ -1,3 +1,4 @@
+#if !HELENGINE_ANDROID_GAME
 #include "rendering/AndroidVulkanRenderer.hpp"
 
 #include <android/log.h>
@@ -98,3 +99,4 @@ extern "C" JNIEXPORT void ANativeActivity_onCreate(ANativeActivity* activity, vo
         report_failure(activity, "Vulkan renderer initialization", error);
     }
 }
+#endif

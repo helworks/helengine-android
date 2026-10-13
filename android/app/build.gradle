@@ -21,6 +21,9 @@ android {
         targetSdk 35
         versionCode 1
         versionName '0.1.0'
+        manifestPlaceholders = [helengineLabel: providers.gradleProperty('helengineCoreRoot').getOrElse('') ? 'HelEngine Android Player' : 'HelEngine Android Host',
+                                helengineOrientation: providers.gradleProperty('helengineOrientation').getOrElse('unspecified') == 'landscape'
+                                    ? 'sensorLandscape' : providers.gradleProperty('helengineOrientation').getOrElse('unspecified')]
 
         ndk {
             abiFilters 'arm64-v8a', 'x86_64'
@@ -29,6 +32,17 @@ android {
         externalNativeBuild {
             cmake {
                 arguments '-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON'
+                if (providers.gradleProperty('helengineCoreRoot').getOrElse('')) {
+                    arguments "-DHELENGINE_CORE_CPP_ROOT=${providers.gradleProperty('helengineCoreRoot').get()}"
+                }
+            }
+        }
+    }
+
+    sourceSets {
+        main {
+            if (providers.gradleProperty('helengineContentRoot').getOrElse('')) {
+                assets.srcDir providers.gradleProperty('helengineContentRoot').get()
             }
         }
     }

@@ -12,7 +12,11 @@ param(
     [string]$JavaHome = '',
     [string]$OutputDirectory = '',
     [string]$WorkingDirectory = '',
-    [string]$GradleCacheRoot = ''
+    [string]$GradleCacheRoot = '',
+    [string]$GeneratedCoreRoot = '',
+    [string]$ContentRoot = '',
+    [ValidateSet('unspecified','portrait','landscape')]
+    [string]$ScreenOrientation = 'unspecified'
 )
 
 Set-StrictMode -Version Latest
@@ -83,8 +87,15 @@ foreach ($requiredPath in @(
     }
 }
 New-Item -ItemType Directory -Force -Path $outputPath,$workingPath,$cachePath | Out-Null
-$gradleAppRoot = Join-Path $workingPath 'gradle-app'
-$nativeBuildRoot = Join-Path $workingPath 'native'
+# Keep Ninja/CMake paths below Windows' legacy length limit even when the editor cache root is deeply nested.
+$nativeCacheIdentity = "$platformRoot|$sdkPath|$GeneratedCoreRoot|$ContentRoot"
+$pathHasher = [Security.Cryptography.SHA256]::Create()
+try { $nativeCacheHash = [BitConverter]::ToString($pathHasher.ComputeHash([Text.Encoding]::UTF8.GetBytes($nativeCacheIdentity))).Replace('-','').Substring(0,16).ToLowerInvariant() }
+finally { $pathHasher.Dispose() }
+$shortBuildRoot = Join-Path $workspaceBuildRoot "apk/$nativeCacheHash"
+$gradleAppRoot = Join-Path $shortBuildRoot 'app'
+$nativeBuildRoot = Join-Path $shortBuildRoot 'cxx'
+New-Item -ItemType Directory -Force -Path $shortBuildRoot | Out-Null
 $buildLog = Join-Path $workingPath 'gradle.log'
 $savedJavaHome = $env:JAVA_HOME
 $savedAndroidHome = $env:ANDROID_HOME
@@ -96,10 +107,14 @@ try {
     $env:ANDROID_HOME = $sdkPath
     $env:ANDROID_SDK_ROOT = $sdkPath
     $env:GRADLE_USER_HOME = $cachePath
+    $ErrorActionPreference = 'Continue'
     & (Join-Path $platformRoot 'android/gradlew.bat') -p (Join-Path $platformRoot 'android') `
         ':app:assembleDebug' --no-daemon --console=plain `
-        "-PhelengineBuildRoot=$gradleAppRoot" "-PhelengineNativeBuildRoot=$nativeBuildRoot" *> $buildLog
-    if ($LASTEXITCODE -ne 0) {
+        "-PhelengineBuildRoot=$gradleAppRoot" "-PhelengineNativeBuildRoot=$nativeBuildRoot" `
+        "-PhelengineCoreRoot=$GeneratedCoreRoot" "-PhelengineContentRoot=$ContentRoot" "-PhelengineOrientation=$ScreenOrientation" *> $buildLog
+    $buildExitCode = $LASTEXITCODE
+    $ErrorActionPreference = 'Stop'
+    if ($buildExitCode -ne 0) {
         throw "Android host build failed. See $buildLog"
     }
     $builtApk = Join-Path $gradleAppRoot 'outputs/apk/debug/app-debug.apk'
@@ -128,6 +143,20 @@ try {
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $archive = [IO.Compression.ZipFile]::OpenRead($builtApk)
     try {
+        if (-not [string]::IsNullOrWhiteSpace($GeneratedCoreRoot)) {
+            foreach ($asset in @('android-content-files.txt','android-content.json','shaders/scene.vert.spv','shaders/scene.frag.spv')) {
+                $packagedEntry = $archive.GetEntry("assets/$asset")
+                if ($null -eq $packagedEntry -or $packagedEntry.Length -eq 0) {
+                    throw "Game APK is missing its authored runtime asset: $asset"
+                }
+            }
+            $inventoryReader = [IO.StreamReader]::new($archive.GetEntry('assets/android-content-files.txt').Open())
+            try { $inventory = $inventoryReader.ReadToEnd() -split '\r?\n' } finally { $inventoryReader.Dispose() }
+            foreach ($asset in $inventory) {
+                if ([string]::IsNullOrWhiteSpace($asset)) { continue }
+                if ($null -eq $archive.GetEntry("assets/$asset")) { throw "Cooked asset is absent from the APK: $asset" }
+            }
+        }
         foreach ($shader in @('boot.vert.spv','boot.frag.spv')) {
             $shaderEntry = $archive.GetEntry("assets/shaders/$shader")
             if ($null -eq $shaderEntry -or $shaderEntry.Length -lt 20 -or $shaderEntry.Length % 4 -ne 0) {
@@ -174,7 +203,10 @@ try {
     Copy-Item -LiteralPath $builtApk -Destination $destinationApk -Force
     [pscustomobject][ordered]@{
         applicationId = 'com.helengine.android.scaffold'
-        packageKind = 'native-host-scaffold'
+        packageKind = $(if ([string]::IsNullOrWhiteSpace($GeneratedCoreRoot)) { 'native-host-probe' } else { 'generated-native-game' })
+        generatedCoreRoot = $GeneratedCoreRoot
+        contentRoot = $ContentRoot
+        screenOrientation = $ScreenOrientation
         apkPath = $destinationApk
         sha256 = (Get-FileHash -LiteralPath $destinationApk -Algorithm SHA256).Hash.ToLowerInvariant()
         verifiedAbis = @('arm64-v8a','x86_64')
@@ -183,6 +215,7 @@ try {
         nativeLibraryAlignmentVerified = $true
         graphicsBackend = 'vulkan'
         packagedSpirvShadersVerified = $true
+        authoredContentInventoryVerified = (-not [string]::IsNullOrWhiteSpace($GeneratedCoreRoot))
         builtAtUtc = [DateTime]::UtcNow.ToString('o')
     } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $outputPath 'host-build-report.json') -Encoding UTF8
     Write-Output "Verified Android native host APK: $destinationApk"
