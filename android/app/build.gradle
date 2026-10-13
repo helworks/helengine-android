@@ -2,6 +2,10 @@ plugins {
     id 'com.android.application'
 }
 
+if (providers.gradleProperty('helengineBuildRoot').isPresent()) {
+    layout.buildDirectory.set(file(providers.gradleProperty('helengineBuildRoot').get()))
+}
+
 android {
     namespace 'com.helengine.android'
     compileSdk 35
@@ -29,6 +33,9 @@ android {
         cmake {
             path file('../../CMakeLists.txt')
             version '3.22.1'
+            if (providers.gradleProperty('helengineNativeBuildRoot').isPresent()) {
+                buildStagingDirectory file(providers.gradleProperty('helengineNativeBuildRoot').get())
+            }
         }
     }
 }
