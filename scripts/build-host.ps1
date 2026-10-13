@@ -128,6 +128,12 @@ try {
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $archive = [IO.Compression.ZipFile]::OpenRead($builtApk)
     try {
+        foreach ($shader in @('boot.vert.spv','boot.frag.spv')) {
+            $shaderEntry = $archive.GetEntry("assets/shaders/$shader")
+            if ($null -eq $shaderEntry -or $shaderEntry.Length -lt 20 -or $shaderEntry.Length % 4 -ne 0) {
+                throw "APK is missing a compiled Vulkan shader: $shader"
+            }
+        }
         foreach ($abi in @('arm64-v8a','x86_64')) {
             $entry = $archive.GetEntry("lib/$abi/libhelengine_android.so")
             if ($null -eq $entry -or $entry.Length -eq 0) {
@@ -175,6 +181,8 @@ try {
         signatureVerified = $true
         nativeActivityExportsVerified = $true
         nativeLibraryAlignmentVerified = $true
+        graphicsBackend = 'vulkan'
+        packagedSpirvShadersVerified = $true
         builtAtUtc = [DateTime]::UtcNow.ToString('o')
     } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $outputPath 'host-build-report.json') -Encoding UTF8
     Write-Output "Verified Android native host APK: $destinationApk"

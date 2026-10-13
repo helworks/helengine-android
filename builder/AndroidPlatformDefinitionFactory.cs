@@ -25,8 +25,8 @@ public static class AndroidPlatformDefinitionFactory {
             ],
             [
                 new PlatformGraphicsProfileDefinition(
-                    "android-native", "Native Host (Scaffold)",
-                    "NativeActivity lifecycle scaffold. Rendering is not implemented.", [])
+                    "android-native", "Vulkan (Native Host)",
+                    "Vulkan native host probe. Authored scene rendering is pending.", [])
             ],
             [],
             [],
