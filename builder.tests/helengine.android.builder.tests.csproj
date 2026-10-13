@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <NuGetAudit>false</NuGetAudit>
+    <HelengineRoot Condition="'$(HelengineRoot)' == '' and '$(HELENGINE_ROOT)' != ''">$(HELENGINE_ROOT)</HelengineRoot>
+    <HelengineRoot Condition="'$(HelengineRoot)' == ''">$(MSBuildThisFileDirectory)..\..\helengine</HelengineRoot>
+  </PropertyGroup>
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" PrivateAssets="all" />
+    <ProjectReference Include="..\builder\helengine.android.builder.csproj" />
+    <ProjectReference Include="$(HelengineRoot)\engine\helengine.platforms\helengine.platforms.csproj" />
+    <!-- Exercise the production editor loader and selection model without compiling the full GUI. -->
+    <Compile Include="$(HelengineRoot)\engine\helengine.editor\managers\project\EditorPlatformAssetBuilderLoader.cs" Link="EditorPlatformAssetBuilderLoader.cs" />
+    <Compile Include="$(HelengineRoot)\engine\helengine.editor\managers\project\EditorPlatformBuildSelectionModel.cs" Link="EditorPlatformBuildSelectionModel.cs" />
+    <None Include="..\platform-plugin.json" Link="platform-plugin.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

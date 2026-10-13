@@ -1,0 +1,6 @@
+{
+  "platformId": "android",
+  "displayName": "Android",
+  "builderAssemblyPath": "artifacts/builder/helengine.android.builder.dll",
+  "definitionFactoryType": "helengine.android.builder.AndroidPlatformDefinitionFactory"
+}

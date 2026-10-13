@@ -1,0 +1,10 @@
+**/bin/
+**/obj/
+artifacts/
+build/
+.gradle/
+.idea/
+**/.cxx/
+**/build/
+android/local.properties
+*.user
