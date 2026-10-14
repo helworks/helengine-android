@@ -95,6 +95,34 @@ adb logcat -d -s HelengineAndroid:I
 
 Select a device with `adb -s <serial>` when more than one is connected. A standalone probe logs `Vulkan triangle frame presented:`. An exported game logs its generated startup scene, extracted asset inventory and `Authored runtime update:` with camera and mesh counts. The Cube Test should show its spinning cube and interface over the scene's cornflower-blue background.
 
+## Runtime settings and quality presets
+
+In **Profiles → Android → Runtime**, create complete independent presets, duplicate them, edit their IDs and names,
+and select the preset used at startup. Presets have no base or inheritance and are saved with the project in
+`settings/platform.android.json` under `runtimeSettings`. The same workflow is available for other platforms.
+The engine/platform declares setting contracts; the engine user authors each platform's preset values.
+
+The initial common controls are global shadows, maximum visible lights and the scene loading budget.
+Android caps the requested light budget at its eight-light forward shader limit. Disabling shadows preserves lighting
+and the authored per-light/material choices. Platform builders may declare additional typed settings through
+`PlatformDefinition.RuntimeSettings`; a host supplies `IPlatformSettingsBackend` for platform-specific validation and application.
+
+Gameplay code controls when settings are applied through `Core.PlatformSettings`:
+
+```csharp
+core.PlatformSettings.ApplyPreset("low");
+core.PlatformSettings.SetBoolean(CommonPlatformRuntimeSettings.ShadowsEnabled, false);
+var values = core.PlatformSettings.CopyActiveValues();
+values[CommonPlatformRuntimeSettings.MaximumVisibleLights] = PlatformSettingValue.FromInteger(4);
+core.PlatformSettings.ApplyValues(values);
+```
+
+`Configuration` lists the current platform's definitions and presets; `GetValue` reads an active value.
+Runtime edits affect only the active configuration. The game owns its quality menu, confirmation flow and preference persistence.
+Settings marked as startup-only reject runtime changes. Native Android and Windows hosts load the exported catalog;
+desktop Play receives the same portable catalog. Other native hosts can opt in by installing
+`he_create_runtime_platform_settings()` into `CoreInitializationOptions.PlatformSettingsConfiguration` before initializing the core.
+
 ## Vulkan lifecycle check
 
 The focused check runs only against the private `helengine_android_host` emulator. It verifies drawing, background/resume surface replacement, a temporary display resize, and activity teardown, then restores display overrides and GPU-debug settings and reopens the app. It uses logs and Vulkan results; it captures no screenshots.

@@ -357,6 +357,7 @@ namespace helengine::android {
         }
     }
     void AndroidSceneGpu::RecordShadows(VkCommandBuffer command,const std::vector<SceneBatch>& batches) {
+        if (!HasShadows && ShadowMapReady) return;
         Shadows.Begin(command);
         if (HasShadows && VertexBuffer) {
             VkDeviceSize offset=0; vkCmdBindVertexBuffers(command,0,1,&VertexBuffer,&offset);
@@ -375,6 +376,7 @@ namespace helengine::android {
             }
         }
         Shadows.End(command);
+        ShadowMapReady=true;
     }
     void AndroidSceneGpu::FitShadowProjection(const std::vector<SceneBatch>& batches) {
         HasShadows=false; ShadowMatrix={};

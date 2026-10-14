@@ -5,6 +5,7 @@
 #include "AndroidInputBackend.hpp"
 #include "AndroidAudioBackend.hpp"
 #include "Core.hpp"
+#include "PlatformSettingsConfiguration.hpp"
 #include <android/native_activity.h>
 #include <chrono>
 
@@ -49,6 +50,8 @@ namespace helengine::android {
         AndroidAudioBackend Audio;
         /// Engine created only after a drawable native window exists.
         std::unique_ptr<::Core> Engine;
+        /// Retains the exported user-authored catalog while the core borrows it during initialization.
+        std::unique_ptr<::PlatformSettingsConfiguration> RuntimeSettings;
         /// Monotonic timestamp of the preceding active frame.
         std::chrono::steady_clock::time_point PreviousFrame;
         /// Successfully processed engine frames used to limit diagnostic output.

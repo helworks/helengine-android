@@ -181,7 +181,7 @@ namespace helengine::android {
             batch.Lighting.Surface[2]=material->Specular; batch.Lighting.Surface[3]=material->Lit?1.0f:0.0f;
             batch.Lighting.Options[0]=material->AlphaMode; batch.Lighting.Options[1]=material->RoughnessTexture?1.0f:0.0f;
             batch.Lighting.ShadowParameters[2]=material->ReceiveShadows?1.0f:0.0f;
-            batch.CastShadow=material->CastShadows && material->AlphaMode!=2;
+            batch.CastShadow=get_ShadowsEnabled() && material->CastShadows && material->AlphaMode!=2;
             if (material->Texture && model->TexCoords.size()!=model->Positions.size()) throw std::runtime_error("Textured Android meshes require authored texture coordinates.");
             auto* range = (*ranges)[rangeIndex];
             for (int32_t i=range->get_IndexStart(); i<range->get_IndexStart()+range->get_IndexCount(); ++i) {
@@ -210,17 +210,18 @@ namespace helengine::android {
             CameraLighting.Ambient[0]+=color.X*intensity; CameraLighting.Ambient[1]+=color.Y*intensity; CameraLighting.Ambient[2]+=color.Z*intensity;
         }
         int count=0;
+        const int lightBudget=std::clamp(get_MaximumVisibleLights(),0,8);
         auto* directional=manager->get_DirectionalLights();
         for (int32_t index=0;index<directional->get_Count();++index) {
             auto* light=(*directional)[index];
             if (!light->get_Parent()->get_IsHierarchyEnabled()) continue;
-            if (count>=8) throw std::runtime_error("Android camera exceeded eight active forward lights.");
+            if (count>=lightBudget) break;
             const auto direction=::float4::RotateVector(::float3(0,0,-1),light->get_Parent()->get_Orientation());
             const auto color=light->get_Color(); const auto intensity=light->get_Intensity();
             CameraLighting.LightPositions[count][0]=direction.X; CameraLighting.LightPositions[count][1]=direction.Y; CameraLighting.LightPositions[count][2]=direction.Z;
             CameraLighting.LightColors[count][0]=color.X*intensity; CameraLighting.LightColors[count][1]=color.Y*intensity; CameraLighting.LightColors[count][2]=color.Z*intensity;
             if (count==0) {
-                CameraLighting.ShadowParameters[0]=light->get_ShadowsEnabled()?1.0f:0.0f;
+                CameraLighting.ShadowParameters[0]=get_ShadowsEnabled() && light->get_ShadowsEnabled()?1.0f:0.0f;
                 CameraLighting.ShadowParameters[1]=0.0005f; CameraLighting.ShadowParameters[3]=light->get_ShadowDistance();
             }
             ++count;
@@ -229,7 +230,7 @@ namespace helengine::android {
         for (int32_t index=0;index<points->get_Count();++index) {
             auto* light=(*points)[index];
             if (!light->get_Parent()->get_IsHierarchyEnabled()) continue;
-            if (count>=8) throw std::runtime_error("Android camera exceeded eight active forward lights.");
+            if (count>=lightBudget) break;
             const auto location=light->get_Parent()->get_Position(); const auto color=light->get_Color(); const auto intensity=light->get_Intensity();
             CameraLighting.LightPositions[count][0]=location.X; CameraLighting.LightPositions[count][1]=location.Y; CameraLighting.LightPositions[count][2]=location.Z; CameraLighting.LightPositions[count][3]=1;
             CameraLighting.LightColors[count][0]=color.X*intensity; CameraLighting.LightColors[count][1]=color.Y*intensity; CameraLighting.LightColors[count][2]=color.Z*intensity;
@@ -239,7 +240,7 @@ namespace helengine::android {
         for (int32_t index=0;index<spots->get_Count();++index) {
             auto* light=(*spots)[index];
             if (!light->get_Parent()->get_IsHierarchyEnabled()) continue;
-            if (count>=8) throw std::runtime_error("Android camera exceeded eight active forward lights.");
+            if (count>=lightBudget) break;
             const auto location=light->get_Parent()->get_Position(); const auto color=light->get_Color(); const auto intensity=light->get_Intensity();
             const auto direction=::float4::RotateVector(::float3(0,0,-1),light->get_Parent()->get_Orientation());
             CameraLighting.LightPositions[count][0]=location.X; CameraLighting.LightPositions[count][1]=location.Y; CameraLighting.LightPositions[count][2]=location.Z; CameraLighting.LightPositions[count][3]=2;

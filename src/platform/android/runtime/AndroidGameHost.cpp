@@ -27,7 +27,7 @@
 namespace helengine::android {
     AndroidGameHost::AndroidGameHost(ANativeActivity* activity, AndroidVulkanRenderer& renderer)
         : Activity(activity), Renderer(renderer), Overlay(renderer), Meshes(renderer,Overlay) {}
-    AndroidGameHost::~AndroidGameHost() { if (Engine) Engine->Dispose(); }
+    AndroidGameHost::~AndroidGameHost() { if (Engine) Engine->Dispose(); if (RuntimeSettings) RuntimeSettings->Dispose(); }
     std::vector<std::uint8_t> AndroidGameHost::ReadPackagedFile(const std::string& path) {
         std::unique_ptr<AAsset,decltype(&AAsset_close)> asset(AAssetManager_open(Activity->assetManager,path.c_str(),AASSET_MODE_STREAMING),AAsset_close);
         if (!asset) throw std::runtime_error("Missing cooked APK asset: "+path);
@@ -63,7 +63,10 @@ namespace helengine::android {
     void AndroidGameHost::Initialize() {
         if (Engine) { Resize(); Resume(); return; }
         ExtractContent(); Engine=std::make_unique<::Core>();
+        Meshes.set_ShadowsEnabled(he_get_runtime_shadows_enabled());
         auto* options=Engine->get_InitializationOptions();
+        RuntimeSettings.reset(he_create_runtime_platform_settings());
+        options->set_PlatformSettingsConfiguration(RuntimeSettings.get());
         options->set_ContentStreamSource(new ::HostFileSystemContentStreamSource("./"));
         options->set_UpdateOrderLayers(8); options->set_RenderOrderLayers3D(8);
         options->set_UpdateListInitialCapacity(128); options->set_RenderList2DInitialCapacity(128); options->set_RenderList3DInitialCapacity(64);

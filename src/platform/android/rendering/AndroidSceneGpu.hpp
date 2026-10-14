@@ -102,6 +102,8 @@ namespace helengine::android {
         std::array<float,16> ShadowMatrix{};
         /// Whether the current frame contains an enabled directional shadow source and casters.
         bool HasShadows=false;
+        /// Records the initial clear and read-only transition required by the bound shadow descriptor, even when shadow drawing is disabled.
+        bool ShadowMapReady=false;
         /// Fits one orthographic light projection to the current eligible world-space vertices.
         void FitShadowProjection(const std::vector<SceneBatch>& batches);
         /// Frame vertex buffer reused only after the submission fence signals.
