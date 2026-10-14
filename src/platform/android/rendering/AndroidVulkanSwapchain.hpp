@@ -24,6 +24,10 @@ namespace helengine::android {
         VkSwapchainKHR GetSwapchain() const { return Swapchain; }
         /// Gets the clear/store render pass used by the native Vulkan probe.
         VkRenderPass GetRenderPass() const { return RenderPass; }
+        /// Gets the compatible pass that preserves native-resolution content between world composites and overlays.
+        VkRenderPass GetLoadRenderPass() const { return LoadRenderPass; }
+        /// Gets the exact attachment format used by compatible sampled world targets.
+        VkFormat GetFormat() const { return Format; }
         /// Gets the framebuffer for the acquired image.
         VkFramebuffer GetFramebuffer(std::uint32_t image) const { return Framebuffers.at(image); }
         /// Gets the presentation signal associated with this swapchain image, rather than an in-flight frame.
@@ -40,6 +44,8 @@ namespace helengine::android {
         VkSwapchainKHR Swapchain = VK_NULL_HANDLE;
         /// Render pass clearing the acquired image and transitioning it for presentation.
         VkRenderPass RenderPass = VK_NULL_HANDLE;
+        /// Continuation pass loads prior presentation color instead of clearing it.
+        VkRenderPass LoadRenderPass = VK_NULL_HANDLE;
         /// Selected RGBA/BGRA surface pixel format.
         VkFormat Format = VK_FORMAT_UNDEFINED;
         /// Current swapchain image dimensions.

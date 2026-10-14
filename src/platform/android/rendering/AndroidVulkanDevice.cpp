@@ -4,6 +4,8 @@
 #include <android/log.h>
 #include <cstring>
 #include <vector>
+#include <array>
+#include <swappy/swappyVk.h>
 
 namespace helengine::android {
     AndroidVulkanDevice::AndroidVulkanDevice() {
@@ -73,15 +75,29 @@ namespace helengine::android {
         queue.queueFamilyIndex = QueueFamily;
         queue.queueCount = 1;
         queue.pQueuePriorities = &priority;
-        const char* extension = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
+        std::uint32_t availableCount=0;
+        check_vulkan(vkEnumerateDeviceExtensionProperties(PhysicalDevice,nullptr,&availableCount,nullptr),"vkEnumerateDeviceExtensionProperties");
+        std::vector<VkExtensionProperties> available(availableCount);
+        check_vulkan(vkEnumerateDeviceExtensionProperties(PhysicalDevice,nullptr,&availableCount,available.data()),"vkEnumerateDeviceExtensionProperties");
+        std::uint32_t requiredCount=0;
+        SwappyVk_determineDeviceExtensions(PhysicalDevice,availableCount,available.data(),&requiredCount,nullptr);
+        std::vector<std::array<char,VK_MAX_EXTENSION_NAME_SIZE+1>> extensionNames(requiredCount);
+        std::vector<char*> requiredNames;
+        for (auto& name:extensionNames) requiredNames.push_back(name.data());
+        if (requiredCount>0) SwappyVk_determineDeviceExtensions(PhysicalDevice,availableCount,available.data(),&requiredCount,requiredNames.data());
+        std::vector<const char*> enabledNames{VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+        for (std::uint32_t index=0;index<requiredCount;++index) {
+            if (std::strcmp(requiredNames[index],VK_KHR_SWAPCHAIN_EXTENSION_NAME)!=0) enabledNames.push_back(requiredNames[index]);
+        }
         VkDeviceCreateInfo device{};
         device.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
         device.queueCreateInfoCount = 1;
         device.pQueueCreateInfos = &queue;
-        device.enabledExtensionCount = 1;
-        device.ppEnabledExtensionNames = &extension;
+        device.enabledExtensionCount = static_cast<std::uint32_t>(enabledNames.size());
+        device.ppEnabledExtensionNames = enabledNames.data();
         check_vulkan(vkCreateDevice(PhysicalDevice, &device, nullptr, &Device), "vkCreateDevice");
         vkGetDeviceQueue(Device, QueueFamily, 0, &Queue);
+        SwappyVk_setQueueFamilyIndex(Device,Queue,QueueFamily);
         VkCommandPoolCreateInfo pool{};
         pool.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
         pool.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;

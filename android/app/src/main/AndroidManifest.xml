@@ -2,10 +2,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-feature android:name="android.hardware.vulkan.version" android:version="0x00400000" android:required="true" />
     <application android:label="${helengineLabel}"
-                 android:hasCode="false"
+                 android:hasCode="true"
                  android:allowBackup="false"
                  android:theme="@android:style/Theme.Material.Light.NoActionBar">
-        <activity android:name="android.app.NativeActivity"
+        <activity android:name="com.helengine.android.HelengineActivity"
                   android:exported="true"
                   android:screenOrientation="${helengineOrientation}"
                   android:configChanges="orientation|keyboardHidden|screenSize|density">

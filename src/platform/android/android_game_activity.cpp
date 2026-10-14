@@ -12,7 +12,7 @@ namespace {
         bool WindowReady=false;
         bool Resumed=false;
         bool Failed=false;
-        explicit AndroidGameActivity(android_app* app) : App(app),Renderer(app->activity->assetManager),Game(app->activity,Renderer) {}
+        explicit AndroidGameActivity(android_app* app) : App(app),Renderer(app->activity),Game(app->activity,Renderer) {}
     };
     /// Records the real native failure and requests Android teardown.
     void Fail(AndroidGameActivity& state,const char* message) {
@@ -26,10 +26,17 @@ namespace {
         try {
             if (command==APP_CMD_INIT_WINDOW && app->window) {
                 state.Renderer.AttachWindow(app->window); state.WindowReady=true; state.Game.Initialize();
+                if (state.Resumed) state.Game.Resume(); else state.Game.Suspend();
             } else if (command==APP_CMD_TERM_WINDOW && state.WindowReady) {
-                state.WindowReady=false; state.Game.GetInput().Reset(); state.Renderer.DetachWindow();
-            } else if (command==APP_CMD_RESUME) { state.Resumed=true; state.Game.Resume(); }
-            else if (command==APP_CMD_PAUSE || command==APP_CMD_STOP) { state.Resumed=false; state.Game.Suspend(); }
+                state.WindowReady=false; state.Game.Suspend(); state.Renderer.DetachWindow();
+            } else if (command==APP_CMD_RESUME) {
+                state.Renderer.ResetFrameTiming(); state.Resumed=true;
+                if (state.WindowReady) state.Game.Resume();
+            }
+            else if (command==APP_CMD_START) state.Game.GetInput().SetStarted(true);
+            else if (command==APP_CMD_STOP) { state.Resumed=false; state.Game.Suspend(); state.Game.GetInput().SetStarted(false); }
+            else if (command==APP_CMD_PAUSE) { state.Resumed=false; state.Game.Suspend(); }
+            else if (command==APP_CMD_LOW_MEMORY) state.Game.RequestMemoryTrim(80);
             else if (command==APP_CMD_LOST_FOCUS || command==APP_CMD_INPUT_CHANGED) state.Game.GetInput().Reset();
             else if (command==APP_CMD_CONFIG_CHANGED && state.WindowReady) state.Game.Resize();
             else if (command==APP_CMD_CONTENT_RECT_CHANGED && state.WindowReady) {
@@ -41,7 +48,11 @@ namespace {
     }
     /// Routes native pointer events through the engine input adapter.
     int32_t HandleInput(android_app* app,AInputEvent* event) {
-        return static_cast<AndroidGameActivity*>(app->userData)->Game.GetInput().HandleEvent(event) ? 1 : 0;
+        auto& state=*static_cast<AndroidGameActivity*>(app->userData);
+        try { return state.Game.GetInput().HandleEvent(event) ? 1 : 0; }
+        catch (::Exception* error) { Fail(state,error->what()); delete error; }
+        catch (const std::exception& error) { Fail(state,error.what()); }
+        return 1;
     }
 }
 
@@ -59,6 +70,11 @@ extern "C" void android_main(android_app* app) {
                 timeout=0;
             }
             if (app->destroyRequested) break;
+            if (!state.Failed) {
+                try { state.Game.TrimPendingMemory(); }
+                catch (::Exception* error) { Fail(state,error->what()); delete error; }
+                catch (const std::exception& error) { Fail(state,error.what()); }
+            }
             if (state.WindowReady && state.Resumed && !state.Failed) {
                 try { state.Game.Frame(); }
                 catch (::Exception* error) { Fail(state,error->what()); delete error; }

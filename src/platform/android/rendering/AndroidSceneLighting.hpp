@@ -23,5 +23,7 @@ namespace helengine::android {
         float ShadowMatrix[16]{};
         /// Shadow enabled, comparison bias, receiver policy and authored shadow cutoff distance.
         float ShadowParameters[4]{};
+        /// World geometry flag keeps opaque coverage distinct from alpha-blended overlays during compositing.
+        float RenderOptions[4]{};
     };
 }

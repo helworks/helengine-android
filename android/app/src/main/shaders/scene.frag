@@ -13,6 +13,7 @@ layout(std140, set=2, binding=0) uniform Shading {
     vec4 LightParameters[8];
     mat4 ShadowMatrix;
     vec4 ShadowParameters;
+    vec4 RenderOptions;
 } Lighting;
 layout(location=0) in vec4 VertexColor;
 layout(location=1) in vec2 VertexTexCoord;
@@ -87,6 +88,7 @@ void main() {
     vec4 sampled = texture(Texture, VertexTexCoord);
     float alpha = sampled.a * VertexColor.a;
     if (Lighting.Options.x > 0.5 && Lighting.Options.x < 1.5 && alpha < 0.5) discard;
+    if (Lighting.RenderOptions.x > 0.5 && Lighting.Options.x < 1.5) alpha = 1.0;
     if (Lighting.Surface.w < 0.5) {
         vec3 color = sampled.rgb * VertexColor.rgb;
         if (Lighting.Options.w > 0.5) color = pow(color, vec3(2.2));

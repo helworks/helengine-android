@@ -29,7 +29,7 @@ $sceneIds = @([regex]::Matches((Get-Content -LiteralPath $catalog -Raw), '\{ "([
 if ($SceneFilter) { $sceneIds = @($sceneIds | Where-Object { $_ -match $SceneFilter }) }
 if ($sceneIds.Count -eq 0) { throw 'The selected scene catalog is empty.' }
 $package = $buildReport.applicationId
-$component = "$package/android.app.NativeActivity"
+$component = "$package/com.helengine.android.HelengineActivity"
 $logRoot = Join-Path (Split-Path $ApkPath -Parent) 'scene-smoke'
 New-Item -ItemType Directory -Force -Path $logRoot | Out-Null
 

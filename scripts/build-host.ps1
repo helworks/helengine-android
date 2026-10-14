@@ -136,15 +136,23 @@ try {
     }
     $badging = Get-Content -LiteralPath $badgingPath -Raw
     if ($badging -notmatch "package: name='com\.helengine\.android\.scaffold'" -or
-        $badging -notmatch "launchable-activity: name='android\.app\.NativeActivity'") {
+        $badging -notmatch "launchable-activity: name='com\.helengine\.android\.HelengineActivity'") {
         throw 'APK does not expose the expected Android native host application.'
+    }
+    $manifestPath = Join-Path $workingPath 'apk-manifest.log'
+    & $aapt dump xmltree $builtApk AndroidManifest.xml *> $manifestPath
+    if ($LASTEXITCODE -ne 0) { throw 'APK binary manifest inspection failed.' }
+    $manifest = Get-Content -LiteralPath $manifestPath -Raw
+    if ($manifest -notmatch 'android:hasCode\(0x0101000c\)=\(type 0x12\)0xffffffff') {
+        throw 'APK must enable Java code loading for HelengineActivity and its SDK bridges.'
     }
 
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $archive = [IO.Compression.ZipFile]::OpenRead($builtApk)
     try {
         if (-not [string]::IsNullOrWhiteSpace($GeneratedCoreRoot)) {
-            foreach ($asset in @('android-content-files.txt','android-content.json','shaders/scene.vert.spv','shaders/scene.frag.spv')) {
+            foreach ($asset in @('android-content-files.txt','android-content.json','shaders/scene.vert.spv','shaders/scene.frag.spv',
+                'shaders/composite.vert.spv','shaders/composite.frag.spv')) {
                 $packagedEntry = $archive.GetEntry("assets/$asset")
                 if ($null -eq $packagedEntry -or $packagedEntry.Length -eq 0) {
                     throw "Game APK is missing its authored runtime asset: $asset"
@@ -156,8 +164,27 @@ try {
                 if ([string]::IsNullOrWhiteSpace($asset)) { continue }
                 if ($null -eq $archive.GetEntry("assets/$asset")) { throw "Cooked asset is absent from the APK: $asset" }
             }
+            $controllerTypes = @('GameControllerManager','GameControllerListener','GameControllerThread','GameControllerInfo')
+            $foundControllerTypes = @{}
+            foreach ($entry in $archive.Entries) {
+                if ($entry.FullName -notmatch '^classes[0-9]*\.dex$') { continue }
+                $stream = $entry.Open()
+                $buffer = [IO.MemoryStream]::new()
+                try {
+                    $stream.CopyTo($buffer)
+                    $dex = [Text.Encoding]::ASCII.GetString($buffer.ToArray())
+                    foreach ($type in $controllerTypes) {
+                        if ($dex.Contains("Lcom/google/android/games/paddleboat/$type;")) { $foundControllerTypes[$type] = $true }
+                    }
+                } finally { $stream.Dispose(); $buffer.Dispose() }
+            }
+            if ($foundControllerTypes.Count -ne $controllerTypes.Count) { throw 'Game APK is missing Android Game Controller Java classes.' }
         }
-        foreach ($shader in @('boot.vert.spv','boot.frag.spv')) {
+        $requiredShaders = @('boot.vert.spv','boot.frag.spv')
+        if (-not [string]::IsNullOrWhiteSpace($GeneratedCoreRoot)) {
+            $requiredShaders += @('scene.vert.spv','scene.frag.spv','shadow.vert.spv','shadow.frag.spv','composite.vert.spv','composite.frag.spv')
+        }
+        foreach ($shader in $requiredShaders) {
             $shaderEntry = $archive.GetEntry("assets/shaders/$shader")
             if ($null -eq $shaderEntry -or $shaderEntry.Length -lt 20 -or $shaderEntry.Length % 4 -ne 0) {
                 throw "APK is missing a compiled Vulkan shader: $shader"
@@ -168,30 +195,78 @@ try {
             if ($null -eq $entry -or $entry.Length -eq 0) {
                 throw "APK is missing the native host for $abi"
             }
-            $libraryPath = Join-Path $workingPath "$abi-libhelengine_android.so"
-            [IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $libraryPath, $true)
-            $elfLog = Join-Path $workingPath "$abi-elf.log"
-            & $readElf --file-header --program-headers --dyn-syms --wide $libraryPath *> $elfLog
-            if ($LASTEXITCODE -ne 0) {
-                throw "Native library inspection failed for $abi"
+            $runtimeEntry = $archive.GetEntry("lib/$abi/libc++_shared.so")
+            if ($null -eq $runtimeEntry -or $runtimeEntry.Length -eq 0) {
+                throw "APK is missing the shared C++ runtime required by frame pacing for $abi"
             }
-            $elf = Get-Content -LiteralPath $elfLog -Raw
-            if ($elf -notmatch 'Class:\s+ELF64' -or
-                $elf -notmatch 'GLOBAL\s+DEFAULT\s+\d+\s+ANativeActivity_onCreate') {
-                throw "NativeActivity entry point is missing from the 64-bit $abi library."
-            }
-            $expectedMachine = if ($abi -eq 'arm64-v8a') { 'AArch64' } else { 'Advanced Micro Devices X86-64' }
-            if ($elf -notmatch ('Machine:\s+' + [regex]::Escape($expectedMachine))) {
-                throw "Native library machine type does not match $abi"
-            }
-            $loadSegments = [regex]::Matches($elf, '(?m)^\s*LOAD\s+.*\s+(0x[0-9a-fA-F]+)\s*$')
-            if ($loadSegments.Count -eq 0) {
-                throw "Native library has no loadable segments for $abi"
-            }
-            foreach ($segment in $loadSegments) {
-                $alignment = [Convert]::ToInt64($segment.Groups[1].Value.Substring(2), 16)
-                if ($alignment -lt 16384) {
-                    throw "Native library segment alignment is below 16 KB for $abi"
+            $libraries = @($archive.Entries | Where-Object { $_.FullName -match "^lib/$abi/[^/]+\.so$" })
+            foreach ($entry in $libraries) {
+                $libraryName = [IO.Path]::GetFileName($entry.FullName)
+                $libraryPath = Join-Path $workingPath "$abi-$libraryName"
+                [IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $libraryPath, $true)
+                $elfLog = Join-Path $workingPath $(if ($libraryName -eq 'libhelengine_android.so') { "$abi-elf.log" } else { "$abi-$libraryName-elf.log" })
+                & $readElf --file-header --program-headers --dyn-syms --wide $libraryPath *> $elfLog
+                if ($LASTEXITCODE -ne 0) {
+                    throw "Native library inspection failed for $abi/$libraryName"
+                }
+                $elf = Get-Content -LiteralPath $elfLog -Raw
+                if ($elf -notmatch 'Class:\s+ELF64') {
+                    throw "APK contains a non-64-bit native library for $abi/$libraryName"
+                }
+                if ($libraryName -eq 'libhelengine_android.so' -and
+                    $elf -notmatch 'GLOBAL\s+DEFAULT\s+\d+\s+ANativeActivity_onCreate') {
+                    throw "NativeActivity entry point is missing from the 64-bit $abi library."
+                }
+                if ($libraryName -eq 'libhelengine_android.so' -and $elf -notmatch 'GLOBAL\s+DEFAULT\s+\d+\s+SwappyVk_queuePresent') {
+                    throw "Android frame pacing is missing from the $abi native library."
+                }
+                if ($libraryName -eq 'libhelengine_android.so' -and
+                    ($elf -notmatch 'GLOBAL\s+DEFAULT\s+UND\s+ATrace_isEnabled' -or
+                     $elf -notmatch 'GLOBAL\s+DEFAULT\s+UND\s+ATrace_beginSection' -or
+                     $elf -notmatch 'GLOBAL\s+DEFAULT\s+UND\s+ATrace_endSection')) {
+                    throw "Android native CPU tracing is missing from the $abi library."
+                }
+                if ($libraryName -eq 'libhelengine_android.so' -and
+                    $elf -notmatch 'GLOBAL\s+DEFAULT\s+\d+\s+Java_com_helengine_android_HelengineActivity_nativeRequestMemoryTrim') {
+                    throw "Android memory-pressure JNI entry point is missing from the $abi native library."
+                }
+                if ($libraryName -eq 'libhelengine_android.so' -and -not [string]::IsNullOrWhiteSpace($GeneratedCoreRoot) -and
+                    $elf -notmatch 'GLOBAL\s+DEFAULT\s+\d+\s+Java_com_helengine_android_HelengineActivity_nativeSetAudioFocusGranted') {
+                    throw "Game audio-focus JNI entry point is missing from the $abi native library."
+                }
+                if ($libraryName -eq 'libhelengine_android.so' -and -not [string]::IsNullOrWhiteSpace($GeneratedCoreRoot) -and
+                    $elf -notmatch 'GLOBAL\s+DEFAULT\s+\d+\s+Paddleboat_init') {
+                    throw "Android Game Controller SDK is missing from the $abi native library."
+                }
+                if ($libraryName -eq 'libhelengine_android.so' -and -not [string]::IsNullOrWhiteSpace($GeneratedCoreRoot) -and
+                    $elf -notmatch 'GLOBAL\s+DEFAULT\s+UND\s+AAsset_seek64') {
+                    throw "Seekable Android APK content streams are missing from the $abi native library."
+                }
+                if ($libraryName -eq 'libhelengine_android.so' -and -not [string]::IsNullOrWhiteSpace($GeneratedCoreRoot) -and
+                    ($elf -notmatch 'GLOBAL\s+DEFAULT\s+UND\s+getrusage(?:@LIBC)?' -or $elf -notmatch 'GLOBAL\s+DEFAULT\s+UND\s+mallinfo(?:@LIBC)?')) {
+                    throw "Android process-memory diagnostics are missing from the $abi native library."
+                }
+                if ($libraryName -eq 'libhelengine_android.so' -and -not [string]::IsNullOrWhiteSpace($GeneratedCoreRoot)) {
+                    if ($elf -notmatch 'GLOBAL\s+DEFAULT\s+\d+\s+\S*AndroidThermalStatusReader\S*ReadStatus') {
+                        throw "Android thermal diagnostics are missing from the $abi native library."
+                    }
+                    if ($elf -match 'GLOBAL\s+DEFAULT\s+UND\s+AThermal_') {
+                        throw "Android thermal diagnostics directly import newer API symbols and would break API 26-29 on $abi."
+                    }
+                }
+                $expectedMachine = if ($abi -eq 'arm64-v8a') { 'AArch64' } else { 'Advanced Micro Devices X86-64' }
+                if ($elf -notmatch ('Machine:\s+' + [regex]::Escape($expectedMachine))) {
+                    throw "Native library machine type does not match $abi/$libraryName"
+                }
+                $loadSegments = [regex]::Matches($elf, '(?m)^\s*LOAD\s+.*\s+(0x[0-9a-fA-F]+)\s*$')
+                if ($loadSegments.Count -eq 0) {
+                    throw "Native library has no loadable segments for $abi/$libraryName"
+                }
+                foreach ($segment in $loadSegments) {
+                    $alignment = [Convert]::ToInt64($segment.Groups[1].Value.Substring(2), 16)
+                    if ($alignment -lt 16384) {
+                        throw "Native library segment alignment is below 16 KB for $abi/$libraryName"
+                    }
                 }
             }
         }
@@ -214,6 +289,22 @@ try {
         nativeActivityExportsVerified = $true
         nativeLibraryAlignmentVerified = $true
         graphicsBackend = 'vulkan'
+        framePacingBackend = 'swappy-2.1.3'
+        nativeFramePacingSymbolsVerified = $true
+        cpuTracingBackend = 'android-atrace'
+        nativeCpuTracingVerified = $true
+        memoryPressureBridgeVerified = $true
+        nativeCxxRuntimeVerified = $true
+        audioFocusBridgeVerified = (-not [string]::IsNullOrWhiteSpace($GeneratedCoreRoot))
+        javaCodeLoadingVerified = $true
+        contentBackend = $(if ([string]::IsNullOrWhiteSpace($GeneratedCoreRoot)) { $null } else { 'apk-asset-streams' })
+        nativeAssetStreamsVerified = (-not [string]::IsNullOrWhiteSpace($GeneratedCoreRoot))
+        memoryDiagnosticsBackend = $(if ([string]::IsNullOrWhiteSpace($GeneratedCoreRoot)) { $null } else { 'android-process-memory' })
+        nativeMemoryDiagnosticsVerified = (-not [string]::IsNullOrWhiteSpace($GeneratedCoreRoot))
+        thermalDiagnosticsBackend = $(if ([string]::IsNullOrWhiteSpace($GeneratedCoreRoot)) { $null } else { 'android-native-thermal-status' })
+        nativeThermalDiagnosticsVerified = (-not [string]::IsNullOrWhiteSpace($GeneratedCoreRoot))
+        gameControllerBackend = $(if ([string]::IsNullOrWhiteSpace($GeneratedCoreRoot)) { $null } else { 'paddleboat-2.0.2' })
+        gameControllerSdkVerified = (-not [string]::IsNullOrWhiteSpace($GeneratedCoreRoot))
         packagedSpirvShadersVerified = $true
         authoredContentInventoryVerified = (-not [string]::IsNullOrWhiteSpace($GeneratedCoreRoot))
         builtAtUtc = [DateTime]::UtcNow.ToString('o')

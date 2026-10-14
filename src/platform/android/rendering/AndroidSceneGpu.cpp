@@ -1,5 +1,6 @@
 #include "AndroidSceneGpu.hpp"
 #include "vulkan_memory.hpp"
+#include "SceneResolutionMath.hpp"
 #include <cstring>
 #include <algorithm>
 #include <cmath>
@@ -16,12 +17,7 @@ namespace helengine::android {
         vkDeviceWaitIdle(Device.GetDevice());
         ResetPipelines();
         for (auto& entry : Textures) DestroyTexture(entry.second);
-        if (VertexMapping) vkUnmapMemory(Device.GetDevice(), VertexMemory);
-        if (VertexBuffer) vkDestroyBuffer(Device.GetDevice(), VertexBuffer, nullptr);
-        if (VertexMemory) vkFreeMemory(Device.GetDevice(), VertexMemory, nullptr);
-        if (LightingMapping) vkUnmapMemory(Device.GetDevice(),LightingMemory);
-        if (LightingBuffer) vkDestroyBuffer(Device.GetDevice(),LightingBuffer,nullptr);
-        if (LightingMemory) vkFreeMemory(Device.GetDevice(),LightingMemory,nullptr);
+        ReleaseFrameBuffers();
         if (Sampler) vkDestroySampler(Device.GetDevice(), Sampler, nullptr);
         if (RepeatSampler) vkDestroySampler(Device.GetDevice(),RepeatSampler,nullptr);
         if (UploadPool) vkDestroyCommandPool(Device.GetDevice(), UploadPool, nullptr);
@@ -47,6 +43,7 @@ namespace helengine::android {
     void AndroidSceneGpu::Initialize(AAssetManager* assets, const AndroidVulkanSwapchain& swapchain) {
         const auto device = Device.GetDevice();
         SurfaceSrgb=swapchain.IsSrgb();
+        OutputExtent=swapchain.GetExtent();
         if (!DescriptorLayout) {
             VkDescriptorSetLayoutBinding binding{0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
             VkDescriptorSetLayoutCreateInfo descriptor{};
@@ -201,14 +198,6 @@ namespace helengine::android {
         check_vulkan(vkBindBufferMemory(Device.GetDevice(), buffer, memory, 0), "vkBindBufferMemory");
         check_vulkan(vkMapMemory(Device.GetDevice(), memory, 0, size, 0, &mapped), "vkMapMemory");
     }
-    void AndroidSceneGpu::DestroyTexture(TextureResource& texture) {
-        const auto device = Device.GetDevice();
-        if (texture.Descriptor) vkFreeDescriptorSets(device, DescriptorPool, 1, &texture.Descriptor);
-        if (texture.View) vkDestroyImageView(device, texture.View, nullptr);
-        if (texture.Image) vkDestroyImage(device, texture.Image, nullptr);
-        if (texture.Memory) vkFreeMemory(device, texture.Memory, nullptr);
-        texture = {};
-    }
     void AndroidSceneGpu::UploadTexture(const std::shared_ptr<SceneTexture>& source, TextureResource& texture) {
         Device.WaitIdle();
         DestroyTexture(texture);
@@ -273,12 +262,12 @@ namespace helengine::android {
     }
     void AndroidSceneGpu::Prepare(const std::vector<SceneBatch>& batches) {
         FitShadowProjection(batches);
-        for (auto it = Textures.begin(); it != Textures.end();) {
-            if (it->second.Source.expired()) { DestroyTexture(it->second); it = Textures.erase(it); }
-            else ++it;
-        }
+        PruneExpiredTextures();
         std::size_t count = 0;
+        FirstVertices.clear(); FirstVertices.reserve(batches.size());
         for (const auto& batch : batches) {
+            if (batch.Vertices.size()>std::numeric_limits<std::uint32_t>::max()-count) throw std::runtime_error("Android frame exceeds the Vulkan vertex index range.");
+            FirstVertices.push_back(static_cast<std::uint32_t>(count));
             count += batch.Vertices.size();
             const auto& source = batch.Texture ? batch.Texture : White;
             auto& resource = Textures[source.get()];
@@ -301,6 +290,7 @@ namespace helengine::android {
         }
         for (std::size_t index=0;index<batches.size();++index) {
             auto lighting=batches[index].Lighting; lighting.Options[3]=SurfaceSrgb?1.0f:0.0f;
+            lighting.RenderOptions[0]=batches[index].WorldSpace?1.0f:0.0f;
             std::copy(ShadowMatrix.begin(),ShadowMatrix.end(),lighting.ShadowMatrix);
             lighting.ShadowParameters[0]=HasShadows?lighting.ShadowParameters[0]:0.0f;
             std::memcpy(static_cast<std::uint8_t*>(LightingMapping)+index*LightingStride,&lighting,sizeof(lighting));
@@ -322,39 +312,53 @@ namespace helengine::android {
         }
     }
     void AndroidSceneGpu::Record(VkCommandBuffer command, const std::vector<SceneBatch>& batches) {
+        for (std::size_t index=0;index<batches.size();++index) RecordBatch(command,batches,index,OutputExtent,true,true);
+    }
+    VkRect2D AndroidSceneGpu::MapRectangle(VkRect2D rectangle,VkExtent2D source,VkExtent2D target) {
+        if (source.width==target.width && source.height==target.height) return rectangle;
+        if (rectangle.offset.x<0 || rectangle.offset.y<0) throw std::invalid_argument("Android scaled rectangles require nonnegative physical coordinates.");
+        auto left=SceneResolutionMath::MapEdge(rectangle.offset.x,source.width,target.width);
+        auto top=SceneResolutionMath::MapEdge(rectangle.offset.y,source.height,target.height);
+        auto right=SceneResolutionMath::MapEdge(rectangle.offset.x+rectangle.extent.width,source.width,target.width);
+        auto bottom=SceneResolutionMath::MapEdge(rectangle.offset.y+rectangle.extent.height,source.height,target.height);
+        if (rectangle.extent.width && right==left) { left=std::min(left,target.width-1); right=left+1; }
+        if (rectangle.extent.height && bottom==top) { top=std::min(top,target.height-1); bottom=top+1; }
+        return {{static_cast<std::int32_t>(left),static_cast<std::int32_t>(top)},{right-left,bottom-top}};
+    }
+    void AndroidSceneGpu::RecordBatch(VkCommandBuffer command,const std::vector<SceneBatch>& batches,std::size_t batchIndex,
+        VkExtent2D target,bool allowColorClear,bool allowDepthClear) {
         VkDeviceSize offset = 0;
         if (VertexBuffer) vkCmdBindVertexBuffers(command,0,1,&VertexBuffer,&offset);
-        std::uint32_t first = 0;
-        for (std::size_t batchIndex=0;batchIndex<batches.size();++batchIndex) {
-            const auto& batch=batches[batchIndex];
-            if (batch.ClearColor || batch.ClearDepth) {
-                VkClearAttachment attachments[2]{}; std::uint32_t count=0;
-                if (batch.ClearColor) {
-                    attachments[count].aspectMask=VK_IMAGE_ASPECT_COLOR_BIT;
-                    auto* color=attachments[count].clearValue.color.float32;
-                    std::copy(batch.ClearValue,batch.ClearValue+4,color);
-                    if (SurfaceSrgb) for (int channel=0;channel<3;++channel) {
-                        color[channel]=color[channel]<=0.04045f?color[channel]/12.92f:std::pow((color[channel]+0.055f)/1.055f,2.4f);
-                    }
-                    ++count;
+        const auto& batch=batches.at(batchIndex);
+        const auto mappedViewport=MapRectangle(batch.Viewport,OutputExtent,target);
+        if (!mappedViewport.extent.width || !mappedViewport.extent.height) return;
+        if ((allowColorClear && batch.ClearColor) || (allowDepthClear && batch.ClearDepth)) {
+            VkClearAttachment attachments[2]{}; std::uint32_t count=0;
+            if (allowColorClear && batch.ClearColor) {
+                attachments[count].aspectMask=VK_IMAGE_ASPECT_COLOR_BIT;
+                auto* color=attachments[count].clearValue.color.float32;
+                std::copy(batch.ClearValue,batch.ClearValue+4,color);
+                if (SurfaceSrgb) for (int channel=0;channel<3;++channel) {
+                    color[channel]=color[channel]<=0.04045f?color[channel]/12.92f:std::pow((color[channel]+0.055f)/1.055f,2.4f);
                 }
-                if (batch.ClearDepth) { attachments[count].aspectMask=VK_IMAGE_ASPECT_DEPTH_BIT; attachments[count].clearValue.depthStencil={batch.ClearDepthValue,0}; ++count; }
-                VkClearRect rectangle{batch.Viewport,0,1}; vkCmdClearAttachments(command,count,attachments,1,&rectangle);
+                ++count;
             }
-            if (batch.Vertices.empty()) continue;
-            auto& texture = Textures.at((batch.Texture ? batch.Texture : White).get());
-            auto& roughness=Textures.at((batch.RoughnessTexture?batch.RoughnessTexture:White).get());
-            vkCmdBindPipeline(command,VK_PIPELINE_BIND_POINT_GRAPHICS,batch.DepthTest?(batch.Transparent?TransparentPipeline:MeshPipeline):OverlayPipeline);
-            VkDescriptorSet sets[]{texture.Descriptor,roughness.Descriptor,LightingDescriptor,ShadowDescriptor};
-            const auto lightingOffset=static_cast<std::uint32_t>(batchIndex*LightingStride);
-            vkCmdBindDescriptorSets(command,VK_PIPELINE_BIND_POINT_GRAPHICS,Layout,0,4,sets,1,&lightingOffset);
-            VkViewport viewport{static_cast<float>(batch.Viewport.offset.x),static_cast<float>(batch.Viewport.offset.y),
-                static_cast<float>(batch.Viewport.extent.width),static_cast<float>(batch.Viewport.extent.height),0,1};
-            const auto scissor=batch.HasScissor?batch.Scissor:batch.Viewport;
-            vkCmdSetViewport(command,0,1,&viewport); vkCmdSetScissor(command,0,1,&scissor);
-            vkCmdDraw(command,static_cast<std::uint32_t>(batch.Vertices.size()),1,first,0);
-            first += batch.Vertices.size();
+            if (allowDepthClear && batch.ClearDepth) { attachments[count].aspectMask=VK_IMAGE_ASPECT_DEPTH_BIT; attachments[count].clearValue.depthStencil={batch.ClearDepthValue,0}; ++count; }
+            VkClearRect rectangle{mappedViewport,0,1}; vkCmdClearAttachments(command,count,attachments,1,&rectangle);
         }
+        if (batch.Vertices.empty()) return;
+        auto& texture = Textures.at((batch.Texture ? batch.Texture : White).get());
+        auto& roughness=Textures.at((batch.RoughnessTexture?batch.RoughnessTexture:White).get());
+        vkCmdBindPipeline(command,VK_PIPELINE_BIND_POINT_GRAPHICS,batch.DepthTest?(batch.Transparent?TransparentPipeline:MeshPipeline):OverlayPipeline);
+        VkDescriptorSet sets[]{texture.Descriptor,roughness.Descriptor,LightingDescriptor,ShadowDescriptor};
+        const auto lightingOffset=static_cast<std::uint32_t>(batchIndex*LightingStride);
+        vkCmdBindDescriptorSets(command,VK_PIPELINE_BIND_POINT_GRAPHICS,Layout,0,4,sets,1,&lightingOffset);
+        VkViewport viewport{static_cast<float>(mappedViewport.offset.x),static_cast<float>(mappedViewport.offset.y),
+            static_cast<float>(mappedViewport.extent.width),static_cast<float>(mappedViewport.extent.height),0,1};
+        const auto scissor=batch.HasScissor?MapRectangle(batch.Scissor,OutputExtent,target):mappedViewport;
+        if (!scissor.extent.width || !scissor.extent.height) return;
+        vkCmdSetViewport(command,0,1,&viewport); vkCmdSetScissor(command,0,1,&scissor);
+        vkCmdDraw(command,static_cast<std::uint32_t>(batch.Vertices.size()),1,FirstVertices.at(batchIndex),0);
     }
     void AndroidSceneGpu::RecordShadows(VkCommandBuffer command,const std::vector<SceneBatch>& batches) {
         if (!HasShadows && ShadowMapReady) return;

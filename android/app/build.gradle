@@ -13,6 +13,7 @@ android {
 
     buildFeatures {
         shaders true
+        prefab true
     }
 
     defaultConfig {
@@ -32,6 +33,7 @@ android {
         externalNativeBuild {
             cmake {
                 arguments '-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON'
+                arguments '-DANDROID_STL=c++_shared'
                 if (providers.gradleProperty('helengineCoreRoot').getOrElse('')) {
                     arguments "-DHELENGINE_CORE_CPP_ROOT=${providers.gradleProperty('helengineCoreRoot').get()}"
                 }
@@ -56,4 +58,9 @@ android {
             }
         }
     }
+}
+
+dependencies {
+    implementation 'androidx.games:games-frame-pacing:2.1.3'
+    implementation 'androidx.games:games-controller:2.0.2'
 }

@@ -93,7 +93,7 @@ extern "C" JNIEXPORT void ANativeActivity_onCreate(ANativeActivity* activity, vo
     activity->callbacks->onNativeWindowDestroyed = on_window_destroyed;
     activity->callbacks->onContentRectChanged = on_content_rect_changed;
     try {
-        activity->instance = new helengine::android::AndroidVulkanRenderer(activity->assetManager);
+        activity->instance = new helengine::android::AndroidVulkanRenderer(activity);
         __android_log_print(ANDROID_LOG_INFO, LogTag, "Android native host scaffold started: Vulkan.");
     } catch (const std::exception& error) {
         report_failure(activity, "Vulkan renderer initialization", error);

@@ -1,8 +1,8 @@
 #include "AndroidGameHost.hpp"
+#include "../diagnostics/AndroidTraceSection.hpp"
 #include "AndroidDisplayDensity.hpp"
 #include "AndroidLaunchOptions.hpp"
 #include "CoreInitializationOptions.hpp"
-#include "HostFileSystemContentStreamSource.hpp"
 #include "GeneratedRuntimeModuleRegistration.hpp"
 #include "RuntimeSceneCatalog.hpp"
 #include "RuntimeSceneCatalogEntry.hpp"
@@ -19,55 +19,24 @@
 #include "runtime/runtime_scene_catalog_manifest.hpp"
 #include "runtime/runtime_startup_manifest.hpp"
 #include <android/log.h>
-#include <filesystem>
-#include <fstream>
-#include <sstream>
-#include <unistd.h>
 
 namespace helengine::android {
     AndroidGameHost::AndroidGameHost(ANativeActivity* activity, AndroidVulkanRenderer& renderer)
-        : Activity(activity), Renderer(renderer), Overlay(renderer), Meshes(renderer,Overlay) {}
+        : Activity(activity), Renderer(renderer), Overlay(renderer), Meshes(renderer,Overlay), Settings(renderer), Content(activity->assetManager), Input(activity), AudioFocus(activity,Audio), MemoryTrim(activity,ALooper_forThread()) {}
     AndroidGameHost::~AndroidGameHost() { if (Engine) Engine->Dispose(); if (RuntimeSettings) RuntimeSettings->Dispose(); }
-    std::vector<std::uint8_t> AndroidGameHost::ReadPackagedFile(const std::string& path) {
-        std::unique_ptr<AAsset,decltype(&AAsset_close)> asset(AAssetManager_open(Activity->assetManager,path.c_str(),AASSET_MODE_STREAMING),AAsset_close);
-        if (!asset) throw std::runtime_error("Missing cooked APK asset: "+path);
-        std::vector<std::uint8_t> data(AAsset_getLength64(asset.get()));
-        std::size_t offset=0;
-        while (offset<data.size()) {
-            int count=AAsset_read(asset.get(),data.data()+offset,data.size()-offset);
-            if (count<=0) throw std::runtime_error("Incomplete cooked APK asset: "+path);
-            offset+=count;
-        }
-        return data;
-    }
-    void AndroidGameHost::ExtractContent() {
-        auto inventory=ReadPackagedFile("android-content-files.txt");
-        std::istringstream files(std::string(inventory.begin(),inventory.end())); std::string relative;
-        const std::filesystem::path root=std::filesystem::path(Activity->internalDataPath)/"content";
-        std::filesystem::create_directories(root);
-        std::size_t count=0;
-        while (std::getline(files,relative)) {
-            if (!relative.empty() && relative.back()=='\r') relative.pop_back();
-            if (relative.empty()) continue;
-            if (relative.rfind("cooked/",0)!=0 || relative.find("..")!=std::string::npos || relative.find('\\')!=std::string::npos) throw std::runtime_error("Invalid packaged content inventory path.");
-            auto bytes=ReadPackagedFile(relative); auto destination=root/relative;
-            std::filesystem::create_directories(destination.parent_path());
-            std::ofstream output(destination,std::ios::binary|std::ios::trunc);
-            output.write(reinterpret_cast<const char*>(bytes.data()),bytes.size());
-            if (!output) throw std::runtime_error("Could not extract cooked asset into private app storage.");
-            ++count;
-        }
-        if (!count || chdir(root.c_str())!=0) throw std::runtime_error("Could not select the Android packaged-content directory.");
-        __android_log_print(ANDROID_LOG_INFO,"HelengineAndroid","APK authored content extracted: files=%zu.",count);
-    }
     void AndroidGameHost::Initialize() {
-        if (Engine) { Resize(); Resume(); return; }
-        ExtractContent(); Engine=std::make_unique<::Core>();
+        const AndroidTraceSection trace("HelEngine.Initialize");
+        if (Engine) { Resize(); return; }
+        Engine=std::make_unique<::Core>();
         Meshes.set_ShadowsEnabled(he_get_runtime_shadows_enabled());
         auto* options=Engine->get_InitializationOptions();
         RuntimeSettings.reset(he_create_runtime_platform_settings());
         options->set_PlatformSettingsConfiguration(RuntimeSettings.get());
-        options->set_ContentStreamSource(new ::HostFileSystemContentStreamSource("./"));
+        Settings.SetConfiguration(RuntimeSettings.get());
+        options->set_PlatformSettingsBackend(&Settings);
+        options->set_ContentStreamSource(&Content);
+        options->set_RuntimeDiagnosticsProvider(&Diagnostics);
+        __android_log_print(ANDROID_LOG_INFO,"HelengineAndroid","APK authored content source ready: direct asset streams.");
         options->set_UpdateOrderLayers(8); options->set_RenderOrderLayers3D(8);
         options->set_UpdateListInitialCapacity(128); options->set_RenderList2DInitialCapacity(128); options->set_RenderList3DInitialCapacity(64);
         options->set_CommitPendingSceneOperationsDuringDraw(false);
@@ -117,7 +86,6 @@ namespace helengine::android {
             Engine->CompleteFrameBoundary();
             Engine->get_SceneManager()->RequestSceneTransition(startup);
         }
-        Resume();
     }
     void AndroidGameHost::Resize() {
         if (Engine) {
@@ -131,14 +99,32 @@ namespace helengine::android {
         Meshes.SetWindowDensityDpi(0,dpi);
         __android_log_print(ANDROID_LOG_INFO,"HelengineAndroid","Android display density reported to engine viewport system: %d dpi.",dpi);
     }
-    void AndroidGameHost::Resume() { PreviousFrame=std::chrono::steady_clock::now(); Input.Reset(); Audio.SetHostPaused(false); }
-    void AndroidGameHost::Suspend() { Input.Reset(); Audio.SetHostPaused(true); }
+    void AndroidGameHost::Resume() {
+        PreviousFrame=std::chrono::steady_clock::now(); Input.Reset();
+        AudioFocus.SetActive(true); Audio.SetHostPaused(false);
+    }
+    void AndroidGameHost::Suspend() {
+        Input.Reset(); Audio.SetHostPaused(true); AudioFocus.SetActive(false);
+    }
+    void AndroidGameHost::TrimPendingMemory() {
+        const int level=MemoryTrim.TakePendingLevel();
+        if (!level) return;
+        const auto result=Renderer.TrimUnusedResources();
+        __android_log_print(ANDROID_LOG_INFO,"HelengineAndroid","Renderer memory trimmed: level=%d buffers=%llu expiredTextures=%llu vertexCapacity=%llu lightingCapacity=%llu.",level,
+            static_cast<unsigned long long>(result.FrameBufferCount),static_cast<unsigned long long>(result.ExpiredTextureCount),
+            static_cast<unsigned long long>(result.VertexCapacityBytes),static_cast<unsigned long long>(result.LightingCapacityBytes));
+    }
     void AndroidGameHost::Frame() {
+        const AndroidTraceSection trace("HelEngine.Frame");
         if (!Engine) throw std::runtime_error("Cannot update Android before engine initialization.");
         const auto now=std::chrono::steady_clock::now();
         const double elapsed=std::chrono::duration<double>(now-PreviousFrame).count(); PreviousFrame=now;
         Renderer.BeginSceneFrame();
-        Engine->Update(elapsed); Engine->Draw(); Overlay.Draw(); Renderer.DrawFrame(); Engine->CompleteFrameBoundary();
+        { const AndroidTraceSection phase("HelEngine.Core.Update"); Engine->Update(elapsed); }
+        { const AndroidTraceSection phase("HelEngine.Core.Draw"); Engine->Draw(); }
+        { const AndroidTraceSection phase("HelEngine.Overlay.Build"); Overlay.Draw(); }
+        Renderer.DrawFrame();
+        { const AndroidTraceSection phase("HelEngine.Scene.Commit"); Engine->CompleteFrameBoundary(); }
         std::string activeScenes;
         auto* scenes=Engine->get_SceneManager()->get_LoadedScenes();
         for (int32_t index=0;index<scenes->get_Count();++index) {

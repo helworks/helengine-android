@@ -140,8 +140,9 @@ namespace helengine::android {
             ::float4x4::Transpose__ref0_out1(inverseTranspose,View);
             CaptureCameraLighting();
             auto clear = Camera->get_ClearSettings();
-            if (clear.ClearColorEnabled || clear.ClearDepthEnabled) {
-                SceneBatch batch{}; batch.Viewport=Viewport; batch.ClearColor=clear.ClearColorEnabled; batch.ClearDepth=clear.ClearDepthEnabled;
+            {
+                SceneBatch batch{}; batch.WorldSpace=true; batch.BeginCamera=true;
+                batch.Viewport=Viewport; batch.ClearColor=clear.ClearColorEnabled; batch.ClearDepth=clear.ClearDepthEnabled;
                 batch.ClearValue[0]=clear.ClearColor.X; batch.ClearValue[1]=clear.ClearColor.Y; batch.ClearValue[2]=clear.ClearColor.Z; batch.ClearValue[3]=clear.ClearColor.W;
                 batch.ClearDepthValue=clear.ClearDepth; Renderer.Submit(std::move(batch));
             }
@@ -173,7 +174,7 @@ namespace helengine::android {
             // Match the shared player contract: imported meshes may have no bindings, and additional submeshes reuse slot zero.
             auto* material = materials->Length==0?&UnboundMaterial:dynamic_cast<AndroidRuntimeMaterial*>((*materials)[rangeIndex<materials->Length?rangeIndex:0]);
             if (!material) throw std::runtime_error("Authored mesh uses an unsupported Android material.");
-            SceneBatch batch{}; batch.Viewport = Viewport; batch.DepthTest = true;
+            SceneBatch batch{}; batch.WorldSpace=true; batch.Viewport = Viewport; batch.DepthTest = true;
             batch.Texture=material->Texture;
             batch.RoughnessTexture=material->RoughnessTexture; batch.Transparent=material->AlphaMode==2;
             batch.Lighting=CameraLighting;

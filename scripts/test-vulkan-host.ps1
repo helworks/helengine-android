@@ -27,7 +27,7 @@ if ([string]::IsNullOrWhiteSpace($ApkPath)) {
 }
 $adb = Join-Path ([IO.Path]::GetFullPath($SdkRoot)) 'platform-tools/adb.exe'
 $applicationId = 'com.helengine.android.scaffold'
-$component = "$applicationId/android.app.NativeActivity"
+$component = "$applicationId/com.helengine.android.HelengineActivity"
 $testRoot = Join-Path $buildRoot 'boot'
 New-Item -ItemType Directory -Force -Path $testRoot | Out-Null
 

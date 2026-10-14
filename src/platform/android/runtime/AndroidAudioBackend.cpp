@@ -9,45 +9,29 @@
 #include <stdexcept>
 
 namespace helengine::android {
-    void AndroidAudioBackend::Check(aaudio_result_t result,const char* operation) {
-        if (result<AAUDIO_OK) throw std::runtime_error(std::string(operation)+": "+AAudio_convertResultToText(result));
-    }
-    void AndroidAudioBackend::OpenStream() {
-        AAudioStreamBuilder* builder=nullptr;
-        Check(AAudio_createStreamBuilder(&builder),"AAudio_createStreamBuilder");
-        AAudioStreamBuilder_setDirection(builder,AAUDIO_DIRECTION_OUTPUT);
-        AAudioStreamBuilder_setFormat(builder,AAUDIO_FORMAT_PCM_FLOAT);
-        AAudioStreamBuilder_setChannelCount(builder,2);
-        AAudioStreamBuilder_setSampleRate(builder,48000);
-        AAudioStreamBuilder_setSharingMode(builder,AAUDIO_SHARING_MODE_SHARED);
-        AAudioStreamBuilder_setPerformanceMode(builder,AAUDIO_PERFORMANCE_MODE_NONE);
-        AAudioStreamBuilder_setDataCallback(builder,WriteAudio,this);
-        AAudioStreamBuilder_setErrorCallback(builder,ReportError,this);
-        auto result=AAudioStreamBuilder_openStream(builder,&Stream);
-        AAudioStreamBuilder_delete(builder);
-        Check(result,"AAudioStreamBuilder_openStream");
-        if (AAudioStream_getFormat(Stream)!=AAUDIO_FORMAT_PCM_FLOAT || AAudioStream_getChannelCount(Stream)!=2) {
-            AAudioStream_close(Stream); Stream=nullptr;
-            throw std::runtime_error("Android audio requires negotiated stereo PCM float output.");
-        }
-        OutputRate=AAudioStream_getSampleRate(Stream);
-        __android_log_print(ANDROID_LOG_INFO,"HelengineAndroid","AAudio output opened: sampleRate=%d channels=2.",OutputRate);
-    }
     void AndroidAudioBackend::Initialize() {
-        if (Stream) return;
-        OpenStream();
+        if (Output.IsInitialized()) return;
+        Output.Initialize(WriteAudio,this);
         Stopping=false;
         Worker=std::thread(&AndroidAudioBackend::Mix,this);
-        Check(AAudioStream_requestStart(Stream),"AAudioStream_requestStart");
     }
     AndroidAudioBackend::~AndroidAudioBackend() {
-        Stopping=true;
+        { std::lock_guard<std::mutex> lock(VoicesMutex); Stopping.store(true,std::memory_order_release); }
+        MixerWake.notify_all();
         if (Worker.joinable()) Worker.join();
-        if (Stream) { AAudioStream_requestStop(Stream); AAudioStream_close(Stream); }
     }
-    void AndroidAudioBackend::SetHostPaused(bool paused) { HostPaused.store(paused,std::memory_order_release); }
+    void AndroidAudioBackend::SetHostPaused(bool paused) {
+        if (!paused) Output.SetPaused(FocusPaused.load(std::memory_order_acquire));
+        { std::lock_guard<std::mutex> lock(VoicesMutex); HostPaused.store(paused,std::memory_order_release); }
+        MixerWake.notify_all();
+        if (paused) Output.SetPaused(true);
+    }
+    void AndroidAudioBackend::SetFocusPaused(bool paused) {
+        { std::lock_guard<std::mutex> lock(VoicesMutex); FocusPaused.store(paused,std::memory_order_release); }
+        MixerWake.notify_all();
+    }
     int32_t AndroidAudioBackend::Play(::AudioAsset* asset,::AudioPlaybackRequest* request) {
-        if (!asset || !request || !Stream) throw std::invalid_argument("Android audio playback requires an initialized device, asset and request.");
+        if (!asset || !request || !Output.IsInitialized()) throw std::invalid_argument("Android audio playback requires an initialized backend, asset and request.");
         const auto channels=asset->get_Channels(); const auto rate=asset->get_SampleRate(); auto* bytes=asset->get_EncodedBytes();
         if ((channels!=1 && channels!=2) || rate<=0 || !bytes || bytes->Length<=0 || bytes->Length%(channels*2)) {
             throw std::runtime_error("Android audio requires complete mono or stereo PCM16 sample frames.");
@@ -83,18 +67,16 @@ namespace helengine::android {
         std::lock_guard<std::mutex> lock(VoicesMutex); auto found=Voices.find(id); return found!=Voices.end() && found->second.Playing;
     }
     void AndroidAudioBackend::Update() {
-        const auto error=Error.exchange(AAUDIO_OK);
-        if (error!=AAUDIO_OK) Check(error,"AAudio asynchronous output failure");
+        Output.SetPaused(HostPaused.load(std::memory_order_acquire) || FocusPaused.load(std::memory_order_acquire));
         std::lock_guard<std::mutex> lock(VoicesMutex);
         for (auto voice=Voices.begin();voice!=Voices.end();) {
             if (!voice->second.Playing) voice=Voices.erase(voice); else ++voice;
         }
     }
-    void AndroidAudioBackend::ReportError(AAudioStream*,void* state,aaudio_result_t error) { static_cast<AndroidAudioBackend*>(state)->Error.store(error,std::memory_order_release); }
     aaudio_data_callback_result_t AndroidAudioBackend::WriteAudio(AAudioStream*,void* state,void* data,int32_t frames) {
         auto& backend=*static_cast<AndroidAudioBackend*>(state); auto* output=static_cast<float*>(data);
         std::fill(output,output+frames*2,0.0f);
-        if (backend.HostPaused.load(std::memory_order_acquire)) return AAUDIO_CALLBACK_RESULT_CONTINUE;
+        if (backend.HostPaused.load(std::memory_order_acquire) || backend.FocusPaused.load(std::memory_order_acquire)) return AAUDIO_CALLBACK_RESULT_CONTINUE;
         auto read=backend.Read.load(std::memory_order_relaxed); const auto written=backend.Written.load(std::memory_order_acquire);
         const auto available=std::min<std::uint64_t>(written-read,frames);
         for (std::uint64_t i=0;i<available;++i) {
@@ -106,18 +88,23 @@ namespace helengine::android {
     void AndroidAudioBackend::Mix() {
         std::array<float,512*2> chunk{};
         while (!Stopping.load(std::memory_order_acquire)) {
+            std::unique_lock<std::mutex> lock(VoicesMutex);
+            MixerWake.wait(lock,[this] {
+                return Stopping.load(std::memory_order_acquire)
+                    || (!HostPaused.load(std::memory_order_acquire) && !FocusPaused.load(std::memory_order_acquire));
+            });
+            if (Stopping.load(std::memory_order_acquire)) break;
             const auto written=Written.load(std::memory_order_relaxed); const auto read=Read.load(std::memory_order_acquire);
-            if (HostPaused.load(std::memory_order_acquire) || written-read>=4096) { std::this_thread::sleep_for(std::chrono::milliseconds(2)); continue; }
+            if (written-read>=4096) { lock.unlock(); std::this_thread::sleep_for(std::chrono::milliseconds(2)); continue; }
             std::fill(chunk.begin(),chunk.end(),0.0f);
             {
-                std::lock_guard<std::mutex> lock(VoicesMutex);
                 const auto master=BusGains.find("master"); const float masterGain=master==BusGains.end()?1.0f:master->second;
                 for (auto& item : Voices) {
                     auto& voice=item.second;
                     if (!voice.Playing || PausedBuses.count("master") || PausedBuses.count(voice.Bus)) continue;
                     const auto bus=BusGains.find(voice.Bus); const float busGain=voice.Bus=="master" || bus==BusGains.end()?1.0f:bus->second;
                     const float gain=voice.Gain*busGain*masterGain/32768.0f;
-                    const auto frameCount=voice.Samples.size()/voice.Channels; const double step=static_cast<double>(voice.SampleRate)/OutputRate;
+                    const auto frameCount=voice.Samples.size()/voice.Channels; const double step=static_cast<double>(voice.SampleRate)/AndroidAudioOutput::SampleRate;
                     for (std::size_t frame=0;frame<512;++frame) {
                         if (voice.Position>=frameCount) {
                             if (!voice.Loop) { voice.Playing=false; break; }

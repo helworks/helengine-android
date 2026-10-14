@@ -3,6 +3,7 @@
 #include "AndroidVulkanSwapchain.hpp"
 #include "AndroidSceneLighting.hpp"
 #include "AndroidShadowMap.hpp"
+#include "AndroidMemoryTrimResult.hpp"
 #include <android/asset_manager.h>
 #include <memory>
 #include <vector>
@@ -32,6 +33,10 @@ namespace helengine::android {
     };
     /// Ordered triangle batch carrying its viewport, texture, and 3D depth policy.
     struct SceneBatch {
+        /// Distinguishes world geometry and depth clears from native-resolution overlays.
+        bool WorldSpace=false;
+        /// Delimits camera order even when its clear policies are disabled or it contains no meshes.
+        bool BeginCamera=false;
         std::vector<SceneVertex> Vertices;
         std::shared_ptr<SceneTexture> Texture;
         VkRect2D Viewport;
@@ -68,13 +73,24 @@ namespace helengine::android {
         void Initialize(AAssetManager* assets, const AndroidVulkanSwapchain& swapchain);
         /// Releases only pipelines tied to the swapchain, preserving resident textures and vertex storage.
         void ResetPipelines();
+        /// Waits for device work, releases rebuildable frame arenas and retires textures without a live source owner.
+        AndroidMemoryTrimResult TrimUnusedResources();
         /// Uploads the next frame's data after its preceding fence has completed.
         void Prepare(const std::vector<SceneBatch>& batches);
         /// Records triangle batches into the active render pass.
         void Record(VkCommandBuffer command, const std::vector<SceneBatch>& batches);
+        /// Records one original batch into a physical or scaled target without changing its geometry or uniform offsets.
+        void RecordBatch(VkCommandBuffer command,const std::vector<SceneBatch>& batches,std::size_t index,
+            VkExtent2D target,bool allowColorClear,bool allowDepthClear);
         /// Renders directional caster geometry before the presentation render pass begins.
         void RecordShadows(VkCommandBuffer command,const std::vector<SceneBatch>& batches);
     private:
+        /// Lets isolated native resource tests seed driver handles without adding a public runtime mutation API.
+        friend class AndroidSceneGpuMemoryTests;
+        /// Releases and clears both coherent frame arenas so the next Prepare recreates correctly sized buffers.
+        void ReleaseFrameBuffers();
+        /// Retires expired texture cache entries only after callers have made GPU resource destruction safe.
+        uint64_t PruneExpiredTextures();
         /// Device-local sampled image and descriptor whose source lifetime is tracked without retaining scene assets.
         struct TextureResource {
             std::weak_ptr<SceneTexture> Source;
@@ -92,6 +108,8 @@ namespace helengine::android {
         void DestroyTexture(TextureResource& texture);
         /// Loads and validates a packaged SPIR-V shader.
         VkShaderModule LoadShader(AAssetManager* assets, const char* path);
+        /// Maps camera or clip edges through rounded target dimensions, retaining explicit empty clips.
+        static VkRect2D MapRectangle(VkRect2D rectangle,VkExtent2D source,VkExtent2D target);
         /// Persistent logical device owned by the parent renderer.
         AndroidVulkanDevice& Device;
         /// Fixed-resolution directional depth resources retained across surface replacement.
@@ -142,6 +160,10 @@ namespace helengine::android {
         VkDeviceSize LightingStride=0;
         /// Attachment encoding copied from each replacement swapchain.
         bool SurfaceSrgb=false;
+        /// Original display size retained for full-resolution layout, projection and overlay coordinates.
+        VkExtent2D OutputExtent{};
+        /// Original vertex-buffer offsets indexed identically to each prepared batch's uniform data.
+        std::vector<std::uint32_t> FirstVertices;
         /// Command pool for synchronous load-time image uploads.
         VkCommandPool UploadPool = VK_NULL_HANDLE;
         /// Resident image resources indexed by stable source addresses.

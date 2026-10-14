@@ -68,6 +68,14 @@ public static class AndroidPlatformDefinitionFactory {
             ],
             [new PlatformStorageProfileDefinition("apk-assets", "APK Assets", PlatformStorageProfileKind.LooseFiles, "android-vulkan-apk", false)],
             [new PlatformMediaProfileDefinition("android-apk", "Android APK", PlatformMediaLayoutKind.InstallTree, false, true)],
-            new RuntimeGenerationContract(RuntimeMaterialResolutionMode.CookedPlatformOwned, true, PackagedPathPolicy.ContentRelativeOnly));
+            new RuntimeGenerationContract(RuntimeMaterialResolutionMode.CookedPlatformOwned, true, PackagedPathPolicy.ContentRelativeOnly)) {
+                RuntimeSettings = [
+                    .. CommonPlatformRuntimeSettings.CreateDefinitions(),
+                    new PlatformRuntimeSettingDefinition(AndroidRuntimeSettingIds.RenderScale, "3D Render Scale", "Rendering",
+                        PlatformSettingValue.FromNumber(1), true, 0.25, 1, []),
+                    new PlatformRuntimeSettingDefinition(AndroidRuntimeSettingIds.TargetFrameRate, "Target Frame Rate (0 = Display)", "Rendering",
+                        PlatformSettingValue.FromInteger(0), true, 0, 240, [])
+                ]
+            };
     }
 }
