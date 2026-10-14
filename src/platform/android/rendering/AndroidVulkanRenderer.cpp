@@ -111,6 +111,9 @@ namespace helengine::android {
         begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
         begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
         check_vulkan(vkBeginCommandBuffer(command, &begin), "vkBeginCommandBuffer");
+#if HELENGINE_ANDROID_GAME
+        SceneGpu.RecordShadows(command,SceneBatches);
+#endif
         VkClearValue clear{};
         clear.color.float32[0] = Swapchain.IsSrgb() ? ToLinearColor(100) : 100.0f / 255.0f;
         clear.color.float32[1] = Swapchain.IsSrgb() ? ToLinearColor(149) : 149.0f / 255.0f;

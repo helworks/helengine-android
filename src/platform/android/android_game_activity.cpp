@@ -29,7 +29,7 @@ namespace {
             } else if (command==APP_CMD_TERM_WINDOW && state.WindowReady) {
                 state.WindowReady=false; state.Game.GetInput().Reset(); state.Renderer.DetachWindow();
             } else if (command==APP_CMD_RESUME) { state.Resumed=true; state.Game.Resume(); }
-            else if (command==APP_CMD_PAUSE || command==APP_CMD_STOP) { state.Resumed=false; state.Game.GetInput().Reset(); }
+            else if (command==APP_CMD_PAUSE || command==APP_CMD_STOP) { state.Resumed=false; state.Game.Suspend(); }
             else if (command==APP_CMD_LOST_FOCUS || command==APP_CMD_INPUT_CHANGED) state.Game.GetInput().Reset();
             else if (command==APP_CMD_CONFIG_CHANGED && state.WindowReady) state.Game.Resize();
             else if (command==APP_CMD_CONTENT_RECT_CHANGED && state.WindowReady) {

@@ -23,7 +23,7 @@ public static class AndroidPlatformDefinitionFactory {
             [
                 new PlatformGraphicsProfileDefinition(
                     "android-native", "Vulkan",
-                    "Native scene rendering with untextured directional-lit meshes and 2D overlays.", [
+                    "Native Vulkan scene rendering with textured meshes and 2D overlays.", [
                         new PlatformSettingDefinition("screen-orientation", "Screen Orientation", PlatformSettingKind.Choice,
                             "unspecified", true, ["unspecified", "portrait", "landscape"])
                     ])
@@ -32,6 +32,11 @@ public static class AndroidPlatformDefinitionFactory {
             [new PlatformMaterialSchemaDefinition("standard-shader", "Standard Material", ["android-native"], [
                 new PlatformMaterialFieldDefinition("base-color", "Base Color", PlatformMaterialFieldKind.Color, "#ffffff", false, []),
                 new PlatformMaterialFieldDefinition("texture-id", "Texture", PlatformMaterialFieldKind.AssetReference, "", false, []),
+                new PlatformMaterialFieldDefinition("metallic", "Metallic", PlatformMaterialFieldKind.Text, "0", false, []),
+                new PlatformMaterialFieldDefinition("roughness", "Roughness", PlatformMaterialFieldKind.Text, "0.5", false, []),
+                new PlatformMaterialFieldDefinition("specular", "Specular", PlatformMaterialFieldKind.Text, "0.5", false, []),
+                new PlatformMaterialFieldDefinition("roughness-texture-id", "Roughness Texture", PlatformMaterialFieldKind.AssetReference, "", false, []),
+                new PlatformMaterialFieldDefinition("alpha-mode", "Alpha Mode", PlatformMaterialFieldKind.Text, "opaque", false, []),
                 new PlatformMaterialFieldDefinition("shader-asset-id", "Shader", PlatformMaterialFieldKind.AssetReference, "", false, []),
                 new PlatformMaterialFieldDefinition("vertex-program", "Vertex Program", PlatformMaterialFieldKind.Text, "", false, []),
                 new PlatformMaterialFieldDefinition("pixel-program", "Pixel Program", PlatformMaterialFieldKind.Text, "", false, []),

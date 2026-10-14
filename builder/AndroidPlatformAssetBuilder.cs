@@ -34,11 +34,11 @@ public sealed class AndroidPlatformAssetBuilder : IPlatformAssetBuilder {
     public PlatformDefinition Definition { get; }
 
     /// <summary>
-    /// Cooks an untextured standard material into the Vulkan player's explicit color and lighting payload.
+    /// Cooks a standard material into the Vulkan player's color, lighting and packaged diffuse-texture payload.
     /// </summary>
     /// <param name="request">Material requested by the editor cook pipeline.</param>
     /// <returns>Serialized platform material bytes with no authored shader dependency.</returns>
-    /// <exception cref="NotSupportedException">The schema or textured material lies outside the current renderer capabilities.</exception>
+    /// <exception cref="NotSupportedException">The material schema is not understood by the Vulkan renderer.</exception>
     public PlatformMaterialCookResult CookMaterial(PlatformMaterialCookRequest request) {
         ArgumentNullException.ThrowIfNull(request);
         if (request.TargetPlatformId != "android" || request.SchemaId != "standard-shader") {
@@ -48,18 +48,36 @@ public sealed class AndroidPlatformAssetBuilder : IPlatformAssetBuilder {
         if (!color.StartsWith('#') || (color.Length != 7 && color.Length != 9)) {
             throw new InvalidOperationException("Android base color must use #RRGGBB or #RRGGBBAA.");
         }
-        if (request.FieldValues.TryGetValue("texture-id", out string texture) && !string.IsNullOrWhiteSpace(texture)) {
-            throw new NotSupportedException("Android 3D textured materials are not implemented yet.");
-        }
+        string texturePath = ResolveTexturePath(request.FieldValues);
         var material = new global::helengine.PlatformMaterialAsset {
             Id = request.MaterialAssetId, RendererFamilyId = "android-native", Lit = true,
             BaseColorR = Convert.ToByte(color.Substring(1, 2), 16),
             BaseColorG = Convert.ToByte(color.Substring(3, 2), 16),
             BaseColorB = Convert.ToByte(color.Substring(5, 2), 16),
             BaseColorA = color.Length == 9 ? Convert.ToByte(color.Substring(7, 2), 16) : (byte)255,
-            TextureRelativePath = string.Empty
+            TextureRelativePath = texturePath
         };
-        return new PlatformMaterialCookResult(global::helengine.files.AssetSerializer.SerializeToBytes(material), []);
+        return new PlatformMaterialCookResult(AndroidMaterialParametersSerializer.Serialize(material, request.FieldValues), []);
+    }
+
+    /// <summary>Uses the editor's cooked texture dependency path and rejects unresolved ids or paths outside packaged content.</summary>
+    /// <param name="fields">Material values after the editor resolves texture dependencies.</param>
+    /// <returns>The content-relative cooked texture path, or an empty string for a solid material.</returns>
+    static string ResolveTexturePath(IReadOnlyDictionary<string, string> fields) {
+        if (!fields.TryGetValue("texture-relative-path", out string path) || string.IsNullOrWhiteSpace(path)) {
+            if (fields.TryGetValue("texture-id", out string id) && !string.IsNullOrWhiteSpace(id)) {
+                throw new InvalidOperationException("Android textured materials require the editor-resolved cooked texture-relative-path.");
+            }
+            return string.Empty;
+        }
+        path = path.Replace('\\', '/');
+        if (path.StartsWith("generated/", StringComparison.Ordinal)) {
+            path = path.Substring("generated/".Length);
+        }
+        if (!path.StartsWith("cooked/", StringComparison.Ordinal) || path.Split('/').Any(segment => segment.Length == 0 || segment == "." || segment == "..") || path.Contains(':')) {
+            throw new InvalidOperationException("Android material texture paths must remain inside cooked APK content.");
+        }
+        return path;
     }
 
     /// <summary>

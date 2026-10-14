@@ -101,4 +101,56 @@ public sealed class AndroidPlatformIntegrationTests {
         Assert.True(asset.Lit);
         Assert.Empty(result.ReferencedShaderDependencies);
     }
+
+    /// <summary>A material keeps the editor's cooked dependency path instead of an authored texture id or a staging-only generated prefix.</summary>
+    [Theory]
+    [InlineData("cooked/textures/checker.hetex")]
+    [InlineData("generated/cooked/textures/checker.hetex")]
+    public void MaterialCookingUsesPackagedTextureDependency(string cookedPath) {
+        var request = new PlatformMaterialCookRequest("material", "materials/checker.hmat", "android", "debug", "android-native", "standard-shader",
+            new Dictionary<string, string> { ["texture-id"] = "checker", ["texture-relative-path"] = cookedPath });
+        var result = new AndroidPlatformAssetBuilder().CookMaterial(request);
+        using var stream = new MemoryStream(result.CookedMaterialBytes);
+        var asset = Assert.IsType<global::helengine.PlatformMaterialAsset>(global::helengine.files.AssetSerializer.Deserialize(stream));
+        Assert.Equal("cooked/textures/checker.hetex", asset.TextureRelativePath);
+    }
+
+    /// <summary>Unresolved texture identities and paths escaping cooked content fail before packaging.</summary>
+    [Theory]
+    [InlineData("")]
+    [InlineData("cooked/../private.hetex")]
+    [InlineData("C:/assets/checker.hetex")]
+    public void MaterialCookingRejectsUnresolvedOrEscapingTextures(string cookedPath) {
+        var request = new PlatformMaterialCookRequest("material", "materials/checker.hmat", "android", "debug", "android-native", "standard-shader",
+            new Dictionary<string, string> { ["texture-id"] = "checker", ["texture-relative-path"] = cookedPath });
+        Assert.Throws<InvalidOperationException>(() => new AndroidPlatformAssetBuilder().CookMaterial(request));
+    }
+
+    /// <summary>Shared dependency readers consume the generic record while the Android renderer receives exact authored PBR parameters and roughness identity.</summary>
+    [Fact]
+    public void MaterialCookingPreservesVersionedShadingParameters() {
+        var request = new PlatformMaterialCookRequest("metal", "materials/metal.hmat", "android", "debug", "android-native", "standard-shader",
+            new Dictionary<string, string> { ["metallic"] = "1", ["roughness"] = "0.25", ["specular"] = "0.75",
+                ["casts-shadows"] = "false", ["receives-shadows"] = "true", ["roughness-texture-id"] = "roughness-atlas", ["alpha-mode"] = "alpha-test" });
+        using var stream = new MemoryStream(new AndroidPlatformAssetBuilder().CookMaterial(request).CookedMaterialBytes);
+        Assert.IsType<global::helengine.PlatformMaterialAsset>(global::helengine.files.AssetSerializer.Deserialize(stream));
+        using var reader = global::helengine.EngineBinaryReader.Create(stream, global::helengine.EngineBinaryEndianness.LittleEndian);
+        Assert.Equal(AndroidMaterialParametersSerializer.Magic, reader.ReadUInt32());
+        Assert.Equal(AndroidMaterialParametersSerializer.Version, reader.ReadByte());
+        Assert.Equal(1f, reader.ReadSingle()); Assert.Equal(0.25f, reader.ReadSingle()); Assert.Equal(0.75f, reader.ReadSingle());
+        Assert.Equal(0, reader.ReadByte()); Assert.Equal(1, reader.ReadByte()); Assert.Equal(1, reader.ReadByte());
+        Assert.Equal("cooked/imported/roughness-atlas", reader.ReadString());
+        Assert.Equal(stream.Length, stream.Position);
+    }
+
+    /// <summary>Invalid surface coefficients fail at cook time rather than entering Vulkan shader calculations.</summary>
+    [Theory]
+    [InlineData("NaN")]
+    [InlineData("-0.1")]
+    [InlineData("1.1")]
+    public void MaterialCookingRejectsInvalidShadingParameters(string value) {
+        var request = new PlatformMaterialCookRequest("material", "materials/test.hmat", "android", "debug", "android-native", "standard-shader",
+            new Dictionary<string, string> { ["roughness"] = value });
+        Assert.Throws<InvalidOperationException>(() => new AndroidPlatformAssetBuilder().CookMaterial(request));
+    }
 }

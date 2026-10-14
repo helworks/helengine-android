@@ -51,12 +51,24 @@ namespace helengine::android {
         ++target->Image->Revision;
     }
     void AndroidRenderManager2D::DrawCamera(::ICamera* camera, VkRect2D viewport) {
-        Viewport=viewport;
+        Viewport=viewport; Scissor=viewport;
         if (camera->get_RenderQueue2D()) camera->get_RenderQueue2D()->VisitOrdered(this);
     }
     void AndroidRenderManager2D::Visit(::IDrawable2D* drawable) {
-        if (drawable && drawable->get_Parent() && drawable->get_Parent()->get_IsHierarchyEnabled()) drawable->Draw();
+        if (!drawable || !drawable->get_Parent() || !drawable->get_Parent()->get_IsHierarchyEnabled()) return;
+        ClipBuilder.BuildClipChain(drawable,&ClipChain);
+        double left=0,top=0,right=Viewport.extent.width,bottom=Viewport.extent.height;
+        for (int32_t index=0;index<ClipChain.get_Count();++index) {
+            const auto rectangle=ClipChain[index]->GetClipRect();
+            left=std::max(left,static_cast<double>(rectangle.X)); top=std::max(top,static_cast<double>(rectangle.Y));
+            right=std::min(right,static_cast<double>(rectangle.X+rectangle.Z)); bottom=std::min(bottom,static_cast<double>(rectangle.Y+rectangle.W));
+        }
+        if (right<=left || bottom<=top) return;
+        const auto x=static_cast<int32_t>(std::floor(left)),y=static_cast<int32_t>(std::floor(top));
+        Scissor={{Viewport.offset.x+x,Viewport.offset.y+y},{static_cast<uint32_t>(std::ceil(right)-x),static_cast<uint32_t>(std::ceil(bottom)-y)}};
+        drawable->Draw();
     }
+    void AndroidRenderManager2D::Submit(SceneBatch batch) { batch.HasScissor=true; batch.Scissor=Scissor; Renderer.Submit(std::move(batch)); }
     SceneVertex AndroidRenderManager2D::Vertex(::Entity* parent, float x, float y, float u, float v, ::byte4 color) {
         const auto matrix=parent->get_WorldTransformMatrix();
         float screenX=x*matrix.M11+y*matrix.M21+matrix.M41;
@@ -77,7 +89,7 @@ namespace helengine::android {
         if (size.X<=0 || size.Y<=0) return;
         SceneBatch batch{}; batch.Viewport=Viewport; batch.Texture=texture->Image;
         AppendQuad(batch,sprite->get_Parent(),0,0,size.X,size.Y,sprite->get_SourceRect(),sprite->get_Color());
-        Renderer.Submit(std::move(batch));
+        Submit(std::move(batch));
     }
     void AndroidRenderManager2D::DrawText(::ITextDrawable2D* text) {
         if (!text || !text->get_Parent() || !text->get_Font()) return;
@@ -100,21 +112,22 @@ namespace helengine::android {
                 const float width=glyph.SourceRect.Z*font->get_AtlasWidth()*scale;
                 const float height=glyph.SourceRect.W*font->get_AtlasHeight()*scale;
                 const float top=y+glyph.OffsetY*scale;
+                const float glyphX=x+glyph.BearingX*scale;
                 auto shadow=text->get_ShadowOffset();
-                if (shadow.X || shadow.Y) AppendQuad(batch,text->get_Parent(),x+shadow.X,top+shadow.Y,width,height,glyph.SourceRect,text->get_ShadowColor());
+                if (shadow.X || shadow.Y) AppendQuad(batch,text->get_Parent(),glyphX+shadow.X,top+shadow.Y,width,height,glyph.SourceRect,text->get_ShadowColor());
                 float outline=text->get_OutlineScale();
                 if (outline>0) {
-                    AppendQuad(batch,text->get_Parent(),x-outline,top,width,height,glyph.SourceRect,text->get_OutlineColor());
-                    AppendQuad(batch,text->get_Parent(),x+outline,top,width,height,glyph.SourceRect,text->get_OutlineColor());
-                    AppendQuad(batch,text->get_Parent(),x,top-outline,width,height,glyph.SourceRect,text->get_OutlineColor());
-                    AppendQuad(batch,text->get_Parent(),x,top+outline,width,height,glyph.SourceRect,text->get_OutlineColor());
+                    AppendQuad(batch,text->get_Parent(),glyphX-outline,top,width,height,glyph.SourceRect,text->get_OutlineColor());
+                    AppendQuad(batch,text->get_Parent(),glyphX+outline,top,width,height,glyph.SourceRect,text->get_OutlineColor());
+                    AppendQuad(batch,text->get_Parent(),glyphX,top-outline,width,height,glyph.SourceRect,text->get_OutlineColor());
+                    AppendQuad(batch,text->get_Parent(),glyphX,top+outline,width,height,glyph.SourceRect,text->get_OutlineColor());
                 }
-                AppendQuad(batch,text->get_Parent(),x,top,width,height,glyph.SourceRect,text->get_Color());
+                AppendQuad(batch,text->get_Parent(),glyphX,top,width,height,glyph.SourceRect,text->get_Color());
                 x+=glyph.AdvanceWidth>0 ? glyph.AdvanceWidth*scale : width;
             }
             y+=font->get_LineHeight()*scale;
         }
-        Renderer.Submit(std::move(batch));
+        Submit(std::move(batch));
     }
     void AndroidRenderManager2D::SubmitRoundedPolygon(::IRoundedRectDrawable2D* shape, float inset, ::byte4 color) {
         auto size=shape->get_Size(); const float width=size.X-2*inset,height=size.Y-2*inset;
@@ -141,7 +154,7 @@ namespace helengine::android {
         for (std::size_t i=0; i<perimeter.size(); ++i) {
             batch.Vertices.push_back(center); batch.Vertices.push_back(perimeter[i]); batch.Vertices.push_back(perimeter[(i+1)%perimeter.size()]);
         }
-        Renderer.Submit(std::move(batch));
+        Submit(std::move(batch));
     }
     void AndroidRenderManager2D::DrawRoundedRect(::IRoundedRectDrawable2D* shape) {
         if (!shape || !shape->get_Parent()) return;

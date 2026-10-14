@@ -1,10 +1,13 @@
 #pragma once
 #include "AndroidVulkanDevice.hpp"
 #include "AndroidVulkanSwapchain.hpp"
+#include "AndroidSceneLighting.hpp"
+#include "AndroidShadowMap.hpp"
 #include <android/asset_manager.h>
 #include <memory>
 #include <vector>
 #include <unordered_map>
+#include <array>
 
 namespace helengine::android {
     /// CPU-side clip-space vertex submitted by the generated engine's render visitors.
@@ -12,6 +15,9 @@ namespace helengine::android {
         float Position[4];
         float Color[4];
         float TexCoord[2];
+        /// World-space attributes interpolated for per-pixel mesh lighting; overlay vertices leave them zero.
+        float WorldPosition[3]{};
+        float Normal[3]{};
     };
     /// RGBA8 image retained by a runtime texture, with a revision for dynamic font-atlas updates.
     struct SceneTexture {
@@ -19,6 +25,10 @@ namespace helengine::android {
         std::uint32_t Height;
         std::uint64_t Revision = 1;
         std::vector<std::uint8_t> Pixels;
+        /// Diffuse material textures decode sRGB at sampling; atlases and scalar maps retain linear bytes.
+        bool Srgb=false;
+        /// Material UVs repeat while sprite source rectangles and font atlases clamp to their bounds.
+        bool Repeat=false;
     };
     /// Ordered triangle batch carrying its viewport, texture, and 3D depth policy.
     struct SceneBatch {
@@ -26,6 +36,26 @@ namespace helengine::android {
         std::shared_ptr<SceneTexture> Texture;
         VkRect2D Viewport;
         bool DepthTest;
+        /// Optional intersection of authored UI clip regions in physical viewport pixels.
+        VkRect2D Scissor{};
+        /// Distinguishes an authored empty clip from a batch using the full camera viewport.
+        bool HasScissor=false;
+        /// Camera clear commands retain their position in the ordered frame even without geometry.
+        bool ClearColor=false;
+        /// Clears camera depth independently of earlier cameras and overlays.
+        bool ClearDepth=false;
+        /// Authored RGBA camera clear color.
+        float ClearValue[4]{};
+        /// Authored depth clear, normally one for a forward depth buffer.
+        float ClearDepthValue=1;
+        /// Optional roughness map bound independently of the diffuse image.
+        std::shared_ptr<SceneTexture> RoughnessTexture;
+        /// Camera, lights and surface parameters retained in the same order as this geometry.
+        SceneLighting Lighting{};
+        /// Blended meshes test existing depth without writing transparent coverage into it.
+        bool Transparent=false;
+        /// Whether this geometry contributes to the directional depth map.
+        bool CastShadow=false;
     };
     /// Uploads authored geometry and font atlases and records Vulkan draws in engine queue order.
     class AndroidSceneGpu {
@@ -42,6 +72,8 @@ namespace helengine::android {
         void Prepare(const std::vector<SceneBatch>& batches);
         /// Records triangle batches into the active render pass.
         void Record(VkCommandBuffer command, const std::vector<SceneBatch>& batches);
+        /// Renders directional caster geometry before the presentation render pass begins.
+        void RecordShadows(VkCommandBuffer command,const std::vector<SceneBatch>& batches);
     private:
         /// Device-local sampled image and descriptor whose source lifetime is tracked without retaining scene assets.
         struct TextureResource {
@@ -62,6 +94,16 @@ namespace helengine::android {
         VkShaderModule LoadShader(AAssetManager* assets, const char* path);
         /// Persistent logical device owned by the parent renderer.
         AndroidVulkanDevice& Device;
+        /// Fixed-resolution directional depth resources retained across surface replacement.
+        AndroidShadowMap Shadows;
+        /// Sampled-depth descriptor bound by the scene fragment shader.
+        VkDescriptorSet ShadowDescriptor=VK_NULL_HANDLE;
+        /// Projection written into each lit batch's uniform block during preparation.
+        std::array<float,16> ShadowMatrix{};
+        /// Whether the current frame contains an enabled directional shadow source and casters.
+        bool HasShadows=false;
+        /// Fits one orthographic light projection to the current eligible world-space vertices.
+        void FitShadowProjection(const std::vector<SceneBatch>& batches);
         /// Frame vertex buffer reused only after the submission fence signals.
         VkBuffer VertexBuffer = VK_NULL_HANDLE;
         /// Host-coherent storage backing the vertex buffer.
@@ -76,12 +118,28 @@ namespace helengine::android {
         VkDescriptorPool DescriptorPool = VK_NULL_HANDLE;
         /// Shared linear clamp sampler for font atlases and the white solid-color image.
         VkSampler Sampler = VK_NULL_HANDLE;
+        /// Linear repeat sampler for authored material tiling.
+        VkSampler RepeatSampler = VK_NULL_HANDLE;
         /// Layout used by both depth-enabled meshes and overlay triangles.
         VkPipelineLayout Layout = VK_NULL_HANDLE;
         /// Depth-tested opaque mesh pipeline.
         VkPipeline MeshPipeline = VK_NULL_HANDLE;
         /// Alpha-blended overlay pipeline with depth testing disabled.
         VkPipeline OverlayPipeline = VK_NULL_HANDLE;
+        /// Depth-tested, alpha-blended mesh pipeline with depth writes disabled.
+        VkPipeline TransparentPipeline = VK_NULL_HANDLE;
+        /// Dynamic uniform layout shared by per-draw camera, light and surface data.
+        VkDescriptorSetLayout LightingLayout = VK_NULL_HANDLE;
+        /// Descriptor selecting the current frame's reusable lighting buffer.
+        VkDescriptorSet LightingDescriptor = VK_NULL_HANDLE;
+        /// Host-coherent aligned per-batch std140 lighting storage.
+        VkBuffer LightingBuffer = VK_NULL_HANDLE;
+        VkDeviceMemory LightingMemory = VK_NULL_HANDLE;
+        void* LightingMapping = nullptr;
+        VkDeviceSize LightingCapacity=0;
+        VkDeviceSize LightingStride=0;
+        /// Attachment encoding copied from each replacement swapchain.
+        bool SurfaceSrgb=false;
         /// Command pool for synchronous load-time image uploads.
         VkCommandPool UploadPool = VK_NULL_HANDLE;
         /// Resident image resources indexed by stable source addresses.

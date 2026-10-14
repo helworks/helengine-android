@@ -12,7 +12,8 @@ param(
     [string]$SdkRoot = '',
     [string]$ApkPath = '',
     [string]$ValidationLayerPath = '',
-    [string]$ExpectedStartupScene = ''
+    [string]$ExpectedStartupScene = '',
+    [string]$StartupSceneOverride = ''
 )
 
 Set-StrictMode -Version Latest
@@ -88,7 +89,11 @@ try {
     }
     Invoke-HostAdb @('shell','am','force-stop',$applicationId) | Out-Null
     Invoke-HostAdb @('logcat','-c') | Out-Null
-    Invoke-HostAdb @('shell','am','start','-W','-n',$component) | Out-Null
+    $startupArguments = @('shell','am','start','-W','-n',$component)
+    if (-not [string]::IsNullOrWhiteSpace($StartupSceneOverride)) {
+        $startupArguments += @('--es','helengine.startup_scene',$StartupSceneOverride)
+    }
+    Invoke-HostAdb $startupArguments | Out-Null
     Start-Sleep -Seconds $(if ([string]::IsNullOrWhiteSpace($ExpectedStartupScene)) { 2 } else { 8 })
     $startupLog = Get-VulkanHostLog
     Assert-VulkanHostHealthy $startupLog

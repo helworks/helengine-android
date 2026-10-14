@@ -1,6 +1,7 @@
 #pragma once
 #include "RuntimeModel.hpp"
 #include "float3.hpp"
+#include "float2.hpp"
 #include <vector>
 
 namespace helengine::android {
@@ -11,6 +12,8 @@ namespace helengine::android {
         std::vector<::float3> Positions;
         /// Model-space normals transformed for directional lighting.
         std::vector<::float3> Normals;
+        /// Authored diffuse texture coordinates, retained independently of the source asset.
+        std::vector<::float2> TexCoords;
         /// Triangle-list indices referenced by the inherited submesh ranges.
         std::vector<std::uint32_t> Indices;
     };

@@ -3,6 +3,7 @@
 #include "AndroidRenderManager3D.hpp"
 #include "AndroidRenderManager2D.hpp"
 #include "AndroidInputBackend.hpp"
+#include "AndroidAudioBackend.hpp"
 #include "Core.hpp"
 #include <android/native_activity.h>
 #include <chrono>
@@ -21,6 +22,8 @@ namespace helengine::android {
         void Resize();
         /// Restarts the frame clock without counting time spent paused as a single long update.
         void Resume();
+        /// Pauses platform audio and clears held input while the activity is in the background.
+        void Suspend();
         /// Advances authored scripts, gathers render queues, presents Vulkan, and commits frame-boundary operations.
         void Frame();
         /// Returns the portable input adapter used by the native event loop.
@@ -42,11 +45,15 @@ namespace helengine::android {
         AndroidRenderManager3D Meshes;
         /// Native pointer input backend owned by the host.
         AndroidInputBackend Input;
+        /// Native PCM output and worker lifetime retained across scene and surface replacement.
+        AndroidAudioBackend Audio;
         /// Engine created only after a drawable native window exists.
         std::unique_ptr<::Core> Engine;
         /// Monotonic timestamp of the preceding active frame.
         std::chrono::steady_clock::time_point PreviousFrame;
         /// Successfully processed engine frames used to limit diagnostic output.
         std::uint64_t Frames = 0;
+        /// Last published scene-id sequence, used to log real scene transitions once.
+        std::string ReportedScenes;
     };
 }

@@ -3,6 +3,8 @@
 #include "IRenderVisitor2D.hpp"
 #include "float4.hpp"
 #include "byte4.hpp"
+#include "ClipRegionStackBuilder2D.hpp"
+#include "IClipRegion2D.hpp"
 #include "../rendering/AndroidVulkanRenderer.hpp"
 
 class Entity;
@@ -37,12 +39,20 @@ namespace helengine::android {
         void AppendQuad(SceneBatch& batch, ::Entity* parent, float x, float y, float width, float height, ::float4 source, ::byte4 color);
         /// Converts a local UI coordinate to clip space using the parent transform and camera viewport.
         SceneVertex Vertex(::Entity* parent, float x, float y, float u, float v, ::byte4 color);
+        /// Attaches the current drawable's authored clipping intersection before submitting its geometry.
+        void Submit(SceneBatch batch);
         /// Emits one convex rounded rectangle polygon, preserving per-corner radius selection.
         void SubmitRoundedPolygon(::IRoundedRectDrawable2D* shape, float inset, ::byte4 color);
         /// Vulkan batch sink shared with the 3D render manager.
         AndroidVulkanRenderer& Renderer;
         /// Active camera's pixel viewport for clip-space conversion and scissoring.
         VkRect2D Viewport{};
+        /// Physical clip intersection resolved for the drawable currently visited.
+        VkRect2D Scissor{};
+        /// Shared clip-chain resolver preserves the engine's ancestor ordering.
+        ::ClipRegionStackBuilder2D ClipBuilder;
+        /// Reusable borrowed ancestor clip references.
+        ::List<::IClipRegion2D*> ClipChain;
         /// Limits the large authored panel's physical bounds diagnostic to the first rendered frame.
         bool ReportedPanelBounds=false;
     };

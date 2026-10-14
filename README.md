@@ -1,6 +1,6 @@
 # HelEngine Android platform
 
-This platform registers Android in the editor and exports debug APKs containing the generated native engine and cooked project content. The DemoDisc Cube Test runs its authored camera, spinning cube, directional light, fonts and interface through Vulkan. The standalone diagnostic triangle host remains available when no generated core is supplied. Audio, textured 3D materials, shadows and the wider DemoDisc scene set remain future work.
+This platform registers Android in the editor and exports debug APKs containing the generated native engine and cooked project content. DemoDisc starts at its authored splash and main menu, with rendering showcases, physics scenes, Tilt Trial levels, software ray tracers and the Max Objects benchmark packaged in the scene catalog. Vulkan handles textured standard materials, metallic/roughness lighting, directional shadows, fonts and clipped interfaces; AAudio mixes cooked audio. The standalone diagnostic triangle host remains available when no generated core is supplied.
 
 ## Register with the source editor
 
@@ -21,17 +21,21 @@ dotnet .\helengine-android\artifacts\builder\helengine.android.builder.dll --des
 dotnet test .\helengine-android\builder.tests\helengine.android.builder.tests.csproj
 ```
 
-The tests exercise platform discovery, editor selection, cooked material colors and rejection of exports without a generated core.
+The tests exercise platform discovery, editor selection, material parameters and texture dependencies, invalid asset paths, and rejection of exports without a generated core.
 
 ## Export an authored game
 
 Enable Android in the project, choose its startup scene and select the graphics option `screen-orientation` (`unspecified`, `portrait` or `landscape`). Landscape maps to Android's `sensorLandscape` activity setting. From the workspace root:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\helengine\scripts\build-platform.ps1 -Project C:\dev\helprojs\demodisc -Platform android -BuildProfile debug -Output .\builds\helengine-android\cube-test\output
+powershell -NoProfile -ExecutionPolicy Bypass -File .\helengine\scripts\build-platform.ps1 -Project C:\dev\helprojs\demodisc -Platform android -BuildProfile debug -Output .\builds\helengine-android\demodisc\output
 ```
 
-The builder stages cooked assets, emits their APK inventory and compiles the engine's generated C++ runtime. The game reads its generated startup catalog and loads the real cooked scene through the shared scene manager. Material cooking currently supports colored `standard-shader` materials without textures; unsupported material inputs fail explicitly. Generated C++ enums must preserve their C# underlying integer type, including unsigned values.
+The builder stages cooked assets, emits their APK inventory and compiles the engine's generated C++ runtime. The game reads its generated startup catalog and loads cooked scenes through the shared scene manager. Material cooking supports `standard-shader` colors, diffuse and roughness textures, metallic/roughness/specular coefficients, alpha modes and shadow policies. Android stores its additional material parameters in a versioned extension after the shared material body. Imported models with no material bindings use the built-in white standard surface; additional submeshes reuse material slot zero, matching the shared player behavior. Unsupported schemas and invalid dependencies fail explicitly. Generated C++ must preserve enum underlying types, numeric formatting and virtual interface destructors.
+
+Run DemoDisc's `menu.configure-android-demo-disc` editor command to prepare Android overrides on the selected scene package and material assets. It uses authoring transactions, preserves other platform settings, and applies the approved diagnostics scale across rendering, physics and benchmark scenes. The package includes 37 scene assets; the dual-screen menu and dual-screen Tilt selection scene use separate platforms and are excluded.
+
+DemoDisc's `menu.validate-android-demo-disc` command checks the cooked package without launching a player. Set `HELENGINE_ANDROID_BUILD_REPORT_PATH` to the APK's `host-build-report.json` before running it. It rejects missing or duplicated entity IDs, dangling component references, unbound required Tilt references, and duplicate Tilt gameplay controllers or cameras.
 
 ## Viewport density
 
@@ -46,6 +50,14 @@ The viewport computes `DPI / (PixelsPerCentimeter * 2.54) * UiScale`. At 420 DPI
 DemoDisc's `menu.configure-cube-test-density` editor command adds Android-only settings to the existing Cube Test and its shared instruction Blueprint through an authoring transaction. Android uses the Blueprint panel with density scaling and edge anchors; the legacy scene instruction viewport is excluded to prevent duplicate panels. The Cube Test factory retains that selection when the scene is regenerated. Common scene content and other platform overrides remain authored.
 
 The Cube Test uses `UiScale = 0.5625` for its Android interface viewports. At 420 DPI the effective scale is 1.4765625, producing an approximately 650x348 instruction panel. Fonts, icons and the separate light-state indicator use the same authored size multiplier.
+
+## Audio and input
+
+The audio backend owns PCM16 mono/stereo voices, resamples to the negotiated AAudio output rate and mixes gains, loops and buses on a worker thread. The real-time callback consumes a bounded ring buffer. Activity pause suspends playback cursors and resume resets the frame clock.
+
+Menu pointer input supports touch and mouse. Hardware controllers expose sticks, triggers and face buttons through the engine input system. On the emulator, arrows or WASD map to the directional pad/left stick, Enter or Space confirms, Back/Escape returns, Q/E map to shoulders and J/K/U/I map to face buttons. Gameplay requiring analog input can use a controller; an on-screen gamepad is not supplied yet.
+
+The forward renderer supports up to eight lights per camera and one 1024-pixel shadow map when the first directional light enables shadows. Point and spot lighting are supported without point/spot shadow maps. These are the current Android renderer limits, so desktop rendering parity and performance are separate validation targets.
 
 ## Native Android project
 
@@ -91,6 +103,8 @@ The focused check runs only against the private `helengine_android_host` emulato
 powershell -NoProfile -ExecutionPolicy Bypass -File .\helengine-android\scripts\test-vulkan-host.ps1
 ```
 
-For a game APK, pass `-ApkPath` and `-ExpectedStartupScene cube_test`; the check also requires scene draw batches, mesh draws and changing authored cube orientation. Use `-ValidationLayerPath` with an official x86-64 `libVkLayer_khronos_validation.so` to require Khronos validation. The script confirms the layer is loaded and rejects validation errors. The layer is supplied externally according to the [Android validation-layer documentation](https://developer.android.com/ndk/guides/graphics/validation-layer); it is not packaged in the APK. Optional `-Serial` and `-SdkRoot` select the private emulator. Reports go to `builds/helengine-android/native-host/output/` and logs to `native-host/boot/`.
+For a game APK, pass `-ApkPath` and `-ExpectedStartupScene cube_test`; the check also requires scene draw batches, mesh draws and changing authored cube orientation. For a full disc whose normal startup is the splash, add `-StartupSceneOverride cube_test`. The debug activity accepts a validated scene catalog ID through the `helengine.startup_scene` string intent extra for focused cold-start tests. Use `-ValidationLayerPath` with an official x86-64 `libVkLayer_khronos_validation.so` to require Khronos validation. The script confirms the layer is loaded and rejects validation errors. The layer is supplied externally according to the [Android validation-layer documentation](https://developer.android.com/ndk/guides/graphics/validation-layer); it is not packaged in the APK. Optional `-Serial` and `-SdkRoot` select the private emulator. Reports go to `builds/helengine-android/native-host/output/` and logs to `native-host/boot/`.
 
 Validated on 2026-10-13 on Android 35 AOSP x86-64 using SwiftShader Vulkan 1.2: authored Cube Test startup, rotation, background/resume, landscape resize and teardown passed with Khronos validation layer 1.4.363.0 loaded and no validation errors. Both ARM64 and x86-64 libraries, shaders, signatures and 16 KB alignment passed package verification; ARM64 was not boot-tested. Landscape renders at 1920x1080 using identity swapchain presentation; Android's compositor handles physical display rotation. The resize path uses Android's content-layout callback, since native producer buffers can retain previous swapchain dimensions.
+
+For the entire exported catalog, `scripts/test-demodisc-scenes.ps1 -ApkPath <verified-apk>` cold-starts each scene and saves its startup log and result alongside the APK. Add `-ValidationLayerPath <layer>` to check all rendering paths with Khronos validation. It restores GPU debug settings and returns the app to its normal splash/menu startup. This check verifies successful scene initialization and presentation; it does not assert a game's win condition or visual parity with desktop.

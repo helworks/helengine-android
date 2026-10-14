@@ -13,6 +13,7 @@ add_library(helengine_android SHARED
     src/platform/android/rendering/AndroidVulkanPipeline.cpp
     src/platform/android/rendering/AndroidVulkanRenderer.cpp)
 target_sources(helengine_android PRIVATE src/platform/android/rendering/AndroidSceneGpu.cpp)
+target_sources(helengine_android PRIVATE src/platform/android/rendering/AndroidShadowMap.cpp)
 target_compile_features(helengine_android PRIVATE cxx_std_17)
 target_compile_definitions(helengine_android PRIVATE VK_USE_PLATFORM_ANDROID_KHR)
 target_compile_options(helengine_android PRIVATE -Wall -Wextra -Werror)
@@ -30,13 +31,16 @@ if(HELENGINE_CORE_CPP_ROOT)
         "${HELENGINE_CORE_CPP_ROOT}/runtime/runtime_code_module_manifest.cpp"
         src/platform/android/runtime/AndroidGameHost.cpp
         src/platform/android/runtime/AndroidDisplayDensity.cpp
+        src/platform/android/runtime/AndroidLaunchOptions.cpp
         src/platform/android/runtime/AndroidInputBackend.cpp
+        src/platform/android/runtime/AndroidAudioBackend.cpp
         src/platform/android/runtime/AndroidRenderManager3D.cpp
         src/platform/android/runtime/AndroidRenderManager2D.cpp
         src/platform/android/android_game_activity.cpp
         "${ANDROID_NDK}/sources/android/native_app_glue/android_native_app_glue.c")
     target_include_directories(helengine_android PRIVATE "${ANDROID_NDK}/sources/android/native_app_glue")
     target_link_options(helengine_android PRIVATE "-uANativeActivity_onCreate")
+    target_link_libraries(helengine_android PRIVATE aaudio)
     target_include_directories(helengine_android PRIVATE "${HELENGINE_CORE_CPP_ROOT}")
     target_compile_definitions(helengine_android PRIVATE HELENGINE_ANDROID_GAME=1)
     set_source_files_properties("${HELENGINE_CORE_CPP_ROOT}/helengine_core_unity.cpp" PROPERTIES COMPILE_OPTIONS "-w")
