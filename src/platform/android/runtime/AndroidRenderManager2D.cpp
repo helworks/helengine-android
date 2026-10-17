@@ -10,6 +10,8 @@
 #include "ITextDrawable2D.hpp"
 #include "IRoundedRectDrawable2D.hpp"
 #include "Entity.hpp"
+#include "Batch2DGeometry.hpp"
+#include "SpriteQuad2D.hpp"
 #include "FontAsset.hpp"
 #include "FontInfo.hpp"
 #include "TextLayoutUtils.hpp"
@@ -85,10 +87,18 @@ namespace helengine::android {
         if (!sprite || !sprite->get_Parent() || !sprite->get_Texture()) return;
         auto* texture=dynamic_cast<AndroidRuntimeTexture*>(sprite->get_Texture());
         if (!texture || !texture->Image) throw std::runtime_error("Android sprite requires a live Android texture.");
-        auto size=sprite->get_Size();
-        if (size.X<=0 || size.Y<=0) return;
+        const auto quad=::Batch2DGeometry::ResolveSpriteQuad(sprite);
+        const auto source=sprite->get_SourceRect(); const auto color=sprite->get_Color();
         SceneBatch batch{}; batch.Viewport=Viewport; batch.Texture=texture->Image;
-        AppendQuad(batch,sprite->get_Parent(),0,0,size.X,size.Y,sprite->get_SourceRect(),sprite->get_Color());
+        const ::float2 points[]{quad.TopLeft,quad.TopRight,quad.BottomLeft,quad.BottomRight};
+        const float u[]{source.X,source.X+source.Z,source.X,source.X+source.Z};
+        const float v[]{source.Y,source.Y,source.Y+source.W,source.Y+source.W};
+        SceneVertex vertices[4];
+        for (int i=0;i<4;++i) {
+            vertices[i]={{2*points[i].X/Viewport.extent.width-1,2*points[i].Y/Viewport.extent.height-1,0,1},
+                {color.X/255.0f,color.Y/255.0f,color.Z/255.0f,color.W/255.0f},{u[i],v[i]}};
+        }
+        for (int i : {0,1,2,2,1,3}) batch.Vertices.push_back(vertices[i]);
         Submit(std::move(batch));
     }
     void AndroidRenderManager2D::DrawText(::ITextDrawable2D* text) {
