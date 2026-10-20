@@ -80,7 +80,7 @@ public sealed class AndroidPlatformIntegrationTests {
     [Fact]
     public void MaterialCookingRejectsUnsupportedSchemas() {
         PlatformMaterialCookRequest request = new(
-            "material", "materials/test.hmat", "android", "debug", "android-native", "", new Dictionary<string, string>());
+            "material", "materials/test.hmat", "android", "debug", "android-native", "", new Dictionary<string, string>(), numericPolicy: global::helengine.NumericPrecisionPolicy.Default);
         NotSupportedException error = Assert.Throws<NotSupportedException>(() => new AndroidPlatformAssetBuilder().CookMaterial(request));
         Assert.Contains("standard-shader", error.Message);
     }
@@ -89,7 +89,7 @@ public sealed class AndroidPlatformIntegrationTests {
     [Fact]
     public void MaterialCookingPreservesAuthoredColor() {
         var request = new PlatformMaterialCookRequest("material", "materials/test.hmat", "android", "debug", "android-native", "standard-shader",
-            new Dictionary<string, string> { ["base-color"] = "#12345678" });
+            new Dictionary<string, string> { ["base-color"] = "#12345678" }, numericPolicy: global::helengine.NumericPrecisionPolicy.Default);
         var result = new AndroidPlatformAssetBuilder().CookMaterial(request);
         using var stream = new MemoryStream(result.CookedMaterialBytes);
         var asset = Assert.IsType<global::helengine.PlatformMaterialAsset>(global::helengine.files.AssetSerializer.Deserialize(stream));
@@ -108,7 +108,7 @@ public sealed class AndroidPlatformIntegrationTests {
     [InlineData("generated/cooked/textures/checker.hetex")]
     public void MaterialCookingUsesPackagedTextureDependency(string cookedPath) {
         var request = new PlatformMaterialCookRequest("material", "materials/checker.hmat", "android", "debug", "android-native", "standard-shader",
-            new Dictionary<string, string> { ["texture-id"] = "checker", ["texture-relative-path"] = cookedPath });
+            new Dictionary<string, string> { ["texture-id"] = "checker", ["texture-relative-path"] = cookedPath }, numericPolicy: global::helengine.NumericPrecisionPolicy.Default);
         var result = new AndroidPlatformAssetBuilder().CookMaterial(request);
         using var stream = new MemoryStream(result.CookedMaterialBytes);
         var asset = Assert.IsType<global::helengine.PlatformMaterialAsset>(global::helengine.files.AssetSerializer.Deserialize(stream));
@@ -122,7 +122,7 @@ public sealed class AndroidPlatformIntegrationTests {
     [InlineData("C:/assets/checker.hetex")]
     public void MaterialCookingRejectsUnresolvedOrEscapingTextures(string cookedPath) {
         var request = new PlatformMaterialCookRequest("material", "materials/checker.hmat", "android", "debug", "android-native", "standard-shader",
-            new Dictionary<string, string> { ["texture-id"] = "checker", ["texture-relative-path"] = cookedPath });
+            new Dictionary<string, string> { ["texture-id"] = "checker", ["texture-relative-path"] = cookedPath }, numericPolicy: global::helengine.NumericPrecisionPolicy.Default);
         Assert.Throws<InvalidOperationException>(() => new AndroidPlatformAssetBuilder().CookMaterial(request));
     }
 
@@ -131,7 +131,7 @@ public sealed class AndroidPlatformIntegrationTests {
     public void MaterialCookingPreservesVersionedShadingParameters() {
         var request = new PlatformMaterialCookRequest("metal", "materials/metal.hmat", "android", "debug", "android-native", "standard-shader",
             new Dictionary<string, string> { ["metallic"] = "1", ["roughness"] = "0.25", ["specular"] = "0.75",
-                ["casts-shadows"] = "false", ["receives-shadows"] = "true", ["roughness-texture-id"] = "roughness-atlas", ["alpha-mode"] = "alpha-test" });
+                ["casts-shadows"] = "false", ["receives-shadows"] = "true", ["roughness-texture-id"] = "roughness-atlas", ["alpha-mode"] = "alpha-test" }, numericPolicy: global::helengine.NumericPrecisionPolicy.Default);
         using var stream = new MemoryStream(new AndroidPlatformAssetBuilder().CookMaterial(request).CookedMaterialBytes);
         Assert.IsType<global::helengine.PlatformMaterialAsset>(global::helengine.files.AssetSerializer.Deserialize(stream));
         using var reader = global::helengine.EngineBinaryReader.Create(stream, global::helengine.EngineBinaryEndianness.LittleEndian);
@@ -150,7 +150,7 @@ public sealed class AndroidPlatformIntegrationTests {
     [InlineData("1.1")]
     public void MaterialCookingRejectsInvalidShadingParameters(string value) {
         var request = new PlatformMaterialCookRequest("material", "materials/test.hmat", "android", "debug", "android-native", "standard-shader",
-            new Dictionary<string, string> { ["roughness"] = value });
+            new Dictionary<string, string> { ["roughness"] = value }, numericPolicy: global::helengine.NumericPrecisionPolicy.Default);
         Assert.Throws<InvalidOperationException>(() => new AndroidPlatformAssetBuilder().CookMaterial(request));
     }
 }
