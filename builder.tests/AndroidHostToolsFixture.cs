@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
+using System.Text;
 
 namespace helengine.android.builder.tests;
 
@@ -59,9 +60,15 @@ public sealed class AndroidHostToolsFixture : IDisposable {
         var start = new ProcessStartInfo(OperatingSystem.IsWindows() ? "powershell.exe" : "pwsh") {
             UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true
         };
-        foreach (string argument in new[] { "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", Path.Combine(Repository, "scripts", "build-host.ps1"),
+        string[] scriptArguments = [Path.Combine(Repository, "scripts", "build-host.ps1"),
             "-SdkRoot", SdkRoot, "-JavaHome", JavaRoot, "-OutputDirectory", OutputRoot, "-WorkingDirectory", WorkingRoot,
-            "-GradleCacheRoot", Path.Combine(Root, "gradle cache"), "-NativeBuildRoot", NativeRoot }) start.ArgumentList.Add(argument);
+            "-GradleCacheRoot", Path.Combine(Root, "gradle cache"), "-NativeBuildRoot", NativeRoot];
+        // Print the actual exception message without the host's terminal-width-dependent error rendering.
+        string command = "try { & " + string.Join(" ", scriptArguments.Select((argument, index) => index % 2 == 1
+            ? argument : "'" + argument.Replace("'", "''") + "'")) +
+            " } catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }";
+        foreach (string argument in new[] { "-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", Convert.ToBase64String(Encoding.Unicode.GetBytes(command)) })
+            start.ArgumentList.Add(argument);
         start.Environment["HELENGINE_ANDROID_HOST_TEST_TRACE"] = TracePath;
         start.Environment["TERM"] = "dumb";
         start.Environment["NO_COLOR"] = "1";
