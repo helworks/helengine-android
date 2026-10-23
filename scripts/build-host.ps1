@@ -22,6 +22,11 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$hostIsWindows = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
+$hostIsMacOS = -not $hostIsWindows -and $PSVersionTable.ContainsKey('OS') -and $PSVersionTable.OS -match 'Darwin|macOS'
+$executableSuffix = if ($hostIsWindows) { '.exe' } else { '' }
+$batchSuffix = if ($hostIsWindows) { '.bat' } else { '' }
+$ndkHostTag = if ($hostIsWindows) { 'windows-x86_64' } elseif ($hostIsMacOS) { 'darwin-x86_64' } else { 'linux-x86_64' }
 $platformRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $workspaceBuildRoot = [IO.Path]::GetFullPath((Join-Path $platformRoot '../builds/helengine-android'))
 if ([string]::IsNullOrWhiteSpace($SdkRoot)) {
@@ -68,19 +73,19 @@ $outputPath = [IO.Path]::GetFullPath($OutputDirectory)
 $workingPath = [IO.Path]::GetFullPath($WorkingDirectory)
 $cachePath = [IO.Path]::GetFullPath($GradleCacheRoot)
 $javaReleasePath = Join-Path $javaPath 'release'
-if (-not (Test-Path -LiteralPath (Join-Path $javaPath 'bin/java.exe') -PathType Leaf) -or
+if (-not (Test-Path -LiteralPath (Join-Path $javaPath "bin/java$executableSuffix") -PathType Leaf) -or
     -not (Test-Path -LiteralPath $javaReleasePath -PathType Leaf) -or
     (Get-Content -LiteralPath $javaReleasePath -Raw) -notmatch 'JAVA_VERSION="17\.') {
     throw "JDK 17 is required for the pinned build toolchain: $javaPath"
 }
 
-$apkSigner = Join-Path $sdkPath 'build-tools/35.0.0/apksigner.bat'
-$aapt = Join-Path $sdkPath 'build-tools/35.0.0/aapt.exe'
-$zipAlign = Join-Path $sdkPath 'build-tools/35.0.0/zipalign.exe'
-$readElf = Join-Path $sdkPath 'ndk/27.0.12077973/toolchains/llvm/prebuilt/windows-x86_64/bin/llvm-readelf.exe'
+$apkSigner = Join-Path $sdkPath "build-tools/35.0.0/apksigner$batchSuffix"
+$aapt = Join-Path $sdkPath "build-tools/35.0.0/aapt$executableSuffix"
+$zipAlign = Join-Path $sdkPath "build-tools/35.0.0/zipalign$executableSuffix"
+$readElf = Join-Path $sdkPath "ndk/27.0.12077973/toolchains/llvm/prebuilt/$ndkHostTag/bin/llvm-readelf$executableSuffix"
 foreach ($requiredPath in @(
     (Join-Path $sdkPath 'platforms/android-35/android.jar'),
-    (Join-Path $sdkPath 'cmake/3.22.1/bin/cmake.exe'),
+    (Join-Path $sdkPath "cmake/3.22.1/bin/cmake$executableSuffix"),
     $apkSigner, $aapt, $zipAlign, $readElf
 )) {
     if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
@@ -113,7 +118,7 @@ try {
     $env:ANDROID_SDK_ROOT = $sdkPath
     $env:GRADLE_USER_HOME = $cachePath
     $ErrorActionPreference = 'Continue'
-    & (Join-Path $platformRoot 'android/gradlew.bat') -p (Join-Path $platformRoot 'android') `
+    & (Join-Path $platformRoot "android/gradlew$batchSuffix") -p (Join-Path $platformRoot 'android') `
         ':app:assembleDebug' --no-daemon --console=plain --project-cache-dir (Join-Path $shortBuildRoot 'gradle-project-cache') `
         "-PhelengineBuildRoot=$gradleAppRoot" "-PhelengineNativeBuildRoot=$nativeBuildRoot" `
         "-PhelengineCoreRoot=$GeneratedCoreRoot" "-PhelengineContentRoot=$ContentRoot" "-PhelengineOrientation=$ScreenOrientation" *> $buildLog

@@ -50,7 +50,7 @@ public static class AndroidBuildWorkspace {
             Directory.GetFiles(Path.Combine(packaged, "cooked"), "*", SearchOption.AllDirectories)
                 .Select(path => Path.GetRelativePath(packaged, path).Replace('\\', '/')), cancellationToken);
         progress.Report(new PlatformBuildProgressUpdate("Native APK", "android", 0, 1, "Compiling generated runtime and packaging Vulkan Android player."));
-        var start = new ProcessStartInfo("powershell.exe") { UseShellExecute = false };
+        var start = new ProcessStartInfo(OperatingSystem.IsWindows() ? "powershell.exe" : "pwsh") { UseShellExecute = false };
         string orientation = request.SelectedGraphicsOptionValues.TryGetValue("screen-orientation", out string selectedOrientation)
             ? selectedOrientation : "unspecified";
         string workspaceRoot = Environment.GetEnvironmentVariable("HELENGINE_BUILD_WORKSPACE_ROOT");
