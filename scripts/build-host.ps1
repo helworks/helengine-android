@@ -13,6 +13,7 @@ param(
     [string]$OutputDirectory = '',
     [string]$WorkingDirectory = '',
     [string]$GradleCacheRoot = '',
+    [string]$NativeBuildRoot = '',
     [string]$GeneratedCoreRoot = '',
     [string]$ContentRoot = '',
     [ValidateSet('unspecified','portrait','landscape')]
@@ -92,7 +93,11 @@ $nativeCacheIdentity = "$platformRoot|$sdkPath|$GeneratedCoreRoot|$ContentRoot"
 $pathHasher = [Security.Cryptography.SHA256]::Create()
 try { $nativeCacheHash = [BitConverter]::ToString($pathHasher.ComputeHash([Text.Encoding]::UTF8.GetBytes($nativeCacheIdentity))).Replace('-','').Substring(0,16).ToLowerInvariant() }
 finally { $pathHasher.Dispose() }
-$shortBuildRoot = Join-Path $workspaceBuildRoot "apk/$nativeCacheHash"
+$shortBuildRoot = if ([string]::IsNullOrWhiteSpace($NativeBuildRoot)) {
+    Join-Path $workspaceBuildRoot "apk/$nativeCacheHash"
+} else {
+    [IO.Path]::GetFullPath($NativeBuildRoot)
+}
 $gradleAppRoot = Join-Path $shortBuildRoot 'app'
 $nativeBuildRoot = Join-Path $shortBuildRoot 'cxx'
 New-Item -ItemType Directory -Force -Path $shortBuildRoot | Out-Null
@@ -109,7 +114,7 @@ try {
     $env:GRADLE_USER_HOME = $cachePath
     $ErrorActionPreference = 'Continue'
     & (Join-Path $platformRoot 'android/gradlew.bat') -p (Join-Path $platformRoot 'android') `
-        ':app:assembleDebug' --no-daemon --console=plain `
+        ':app:assembleDebug' --no-daemon --console=plain --project-cache-dir (Join-Path $shortBuildRoot 'gradle-project-cache') `
         "-PhelengineBuildRoot=$gradleAppRoot" "-PhelengineNativeBuildRoot=$nativeBuildRoot" `
         "-PhelengineCoreRoot=$GeneratedCoreRoot" "-PhelengineContentRoot=$ContentRoot" "-PhelengineOrientation=$ScreenOrientation" *> $buildLog
     $buildExitCode = $LASTEXITCODE

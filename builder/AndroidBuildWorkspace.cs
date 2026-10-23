@@ -17,7 +17,7 @@ public static class AndroidBuildWorkspace {
         if (string.IsNullOrWhiteSpace(request.GeneratedCoreCppRootPath) || !File.Exists(Path.Combine(request.GeneratedCoreCppRootPath, "Core.hpp"))) {
             throw new InvalidOperationException("Android export requires the editor-generated native core.");
         }
-        string repository = Path.GetFullPath(Path.Combine(typeof(AndroidBuildWorkspace).Assembly.Location, "..", "..", ".."));
+        string repository = ResolveRepositoryRoot(Environment.GetEnvironmentVariable("HELENGINE_ANDROID_REPOSITORY_ROOT"), typeof(AndroidBuildWorkspace).Assembly.Location);
         if (!File.Exists(Path.Combine(repository, "scripts", "build-host.ps1"))) {
             throw new InvalidOperationException("Publish the Android builder to its platform repository artifacts/builder directory.");
         }
@@ -53,9 +53,12 @@ public static class AndroidBuildWorkspace {
         var start = new ProcessStartInfo("powershell.exe") { UseShellExecute = false };
         string orientation = request.SelectedGraphicsOptionValues.TryGetValue("screen-orientation", out string selectedOrientation)
             ? selectedOrientation : "unspecified";
+        string workspaceRoot = Environment.GetEnvironmentVariable("HELENGINE_BUILD_WORKSPACE_ROOT");
+        if (string.IsNullOrWhiteSpace(workspaceRoot)) workspaceRoot = request.WorkingRoot;
         foreach (string argument in new[] { "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", Path.Combine(repository, "scripts", "build-host.ps1"),
             "-GeneratedCoreRoot", generated, "-ContentRoot", packaged, "-OutputDirectory", request.OutputRoot,
-            "-WorkingDirectory", Path.Combine(request.WorkingRoot, "native-apk"), "-ScreenOrientation", orientation }) {
+            "-WorkingDirectory", Path.Combine(request.WorkingRoot, "native-apk"), "-ScreenOrientation", orientation,
+            "-NativeBuildRoot", Path.Combine(workspaceRoot, "android-native"), "-GradleCacheRoot", Path.Combine(workspaceRoot, "gradle-cache") }) {
             start.ArgumentList.Add(argument);
         }
         using Process process = Process.Start(start) ?? throw new InvalidOperationException("Android build process could not start.");
@@ -66,5 +69,22 @@ public static class AndroidBuildWorkspace {
         return new PlatformBuildReport(true, [], request.Manifest.Scenes.Select(scene =>
             new PlatformBuildItemOutcome(scene.SceneId, PlatformBuildItemOutcomeKind.Succeeded)).ToArray(),
             request.Manifest.LooseAssets.Select(asset => new PlatformBuildItemOutcome(asset.AssetId, PlatformBuildItemOutcomeKind.Succeeded)).ToArray());
+    }
+
+    /// <summary>Uses a validated explicit checkout for externally published builders, preserving the installed layout otherwise.</summary>
+    /// <param name="configuredRoot">Optional HELENGINE_ANDROID_REPOSITORY_ROOT source checkout override.</param>
+    /// <param name="assemblyLocation">Installed builder path used only when no override was supplied.</param>
+    /// <returns>The full native Android source repository path.</returns>
+    internal static string ResolveRepositoryRoot(string configuredRoot, string assemblyLocation) {
+        if (!string.IsNullOrWhiteSpace(configuredRoot)) {
+            string repository = configuredRoot.Trim();
+            if (!Path.IsPathFullyQualified(repository)) throw new InvalidOperationException("HELENGINE_ANDROID_REPOSITORY_ROOT must name an absolute Android source repository.");
+            repository = Path.GetFullPath(repository);
+            if (!File.Exists(Path.Combine(repository, "CMakeLists.txt")) || !File.Exists(Path.Combine(repository, "scripts", "build-host.ps1"))) {
+                throw new InvalidOperationException($"HELENGINE_ANDROID_REPOSITORY_ROOT '{repository}' is not an Android source repository.");
+            }
+            return repository;
+        }
+        return Path.GetFullPath(Path.Combine(assemblyLocation, "..", "..", ".."));
     }
 }

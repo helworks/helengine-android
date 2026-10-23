@@ -15,9 +15,9 @@ namespace helengine::android {
         /// Copies positions, normals, index ranges, and bounds from an authored model.
         ::RuntimeModel* BuildModelFromRaw(::ModelAsset* data) override;
         /// Loads and validates an engine-owned cooked model payload.
-        ::RuntimeModel* BuildModelFromCooked(std::string path, ::IContentStreamSource* source) override;
+        ::RuntimeModel* BuildModelFromCooked(HeCppString path, ::IContentStreamSource* source) override;
         /// Loads the builder-owned standard material payload.
-        ::RuntimeMaterial* BuildMaterialFromCooked(std::string path, ::IContentStreamSource* source) override;
+        ::RuntimeMaterial* BuildMaterialFromCooked(HeCppString path, ::IContentStreamSource* source) override;
         /// Converts one standard material's color and lighting settings into a runtime resource.
         ::RuntimeMaterial* BuildMaterialFromCooked(::PlatformMaterialAsset* material) override;
         /// Collects 3D geometry followed by each camera's ordered overlay queue.

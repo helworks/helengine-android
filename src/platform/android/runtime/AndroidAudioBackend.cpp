@@ -41,7 +41,7 @@ namespace helengine::android {
         }
         AndroidAudioVoice voice;
         voice.Channels=channels; voice.SampleRate=rate; voice.Gain=request->get_Gain(); voice.Loop=request->get_Loop();
-        voice.Bus=request->get_BusId().empty()?"master":request->get_BusId();
+        voice.Bus=request->get_BusId().empty()?"master":request->get_BusId().raw();
         voice.Samples.resize(bytes->Length/2);
         for (std::size_t i=0;i<voice.Samples.size();++i) voice.Samples[i]=static_cast<std::int16_t>((*bytes)[i*2]|(static_cast<std::uint16_t>((*bytes)[i*2+1])<<8));
         const auto frames=voice.Samples.size()/channels;
@@ -55,13 +55,13 @@ namespace helengine::android {
         return id;
     }
     void AndroidAudioBackend::Stop(int32_t id) { std::lock_guard<std::mutex> lock(VoicesMutex); Voices.erase(id); }
-    void AndroidAudioBackend::SetBusGain(std::string bus,float gain) {
+    void AndroidAudioBackend::SetBusGain(HeCppString bus,float gain) {
         if (bus.empty() || !std::isfinite(gain) || gain<0) throw std::invalid_argument("Android audio bus gain must be finite and nonnegative on a named bus.");
-        std::lock_guard<std::mutex> lock(VoicesMutex); BusGains[bus]=gain;
+        std::lock_guard<std::mutex> lock(VoicesMutex); BusGains[bus.raw()]=gain;
     }
-    void AndroidAudioBackend::SetBusPaused(std::string bus,bool paused) {
+    void AndroidAudioBackend::SetBusPaused(HeCppString bus,bool paused) {
         if (bus.empty()) throw std::invalid_argument("Android audio bus must have a name.");
-        std::lock_guard<std::mutex> lock(VoicesMutex); if (paused) PausedBuses.insert(bus); else PausedBuses.erase(bus);
+        std::lock_guard<std::mutex> lock(VoicesMutex); if (paused) PausedBuses.insert(bus.raw()); else PausedBuses.erase(bus.raw());
     }
     bool AndroidAudioBackend::IsPlaying(int32_t id) {
         std::lock_guard<std::mutex> lock(VoicesMutex); auto found=Voices.find(id); return found!=Voices.end() && found->second.Playing;

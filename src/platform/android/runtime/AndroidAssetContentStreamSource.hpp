@@ -9,7 +9,7 @@ namespace helengine::android {
         /// Borrows the activity's asset manager, which must outlive this source and every stream it opens.
         explicit AndroidAssetContentStreamSource(AAssetManager* manager);
         /// Returns a caller-owned, independent stream for one normalized cooked content path.
-        ::Stream* OpenRead(std::string assetPath) override;
+        ::Stream* OpenRead(HeCppString assetPath) override;
     private:
         /// Keeps content paths inside the cooked APK namespace while allowing ordinary relative dot segments.
         static std::string NormalizePath(const std::string& path);

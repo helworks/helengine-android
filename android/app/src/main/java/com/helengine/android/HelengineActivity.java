@@ -5,6 +5,9 @@ import android.os.Bundle;
 
 /** Keeps NativeActivity's Vulkan host and supplies Android audio-focus lifecycle callbacks. */
 public final class HelengineActivity extends NativeActivity {
+    /** Registers this app's JNI callbacks with its class loader before lifecycle listeners can invoke them. */
+    static { System.loadLibrary("helengine_android"); }
+
     /** Controller is created before NativeActivity starts the native glue thread. */
     AndroidAudioFocus AudioFocus;
     /** Java lifecycle gate prevents a delayed native resume from requesting focus during suspension. */

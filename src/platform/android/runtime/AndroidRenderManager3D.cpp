@@ -36,7 +36,7 @@ namespace helengine::android {
     /// Applies and normalizes an inverse-transpose normal transform.
     static ::float3 TransformNormal(const ::float3& p, const ::float4x4& m) {
         ::float3 n(p.X*m.M11+p.Y*m.M21+p.Z*m.M31,p.X*m.M12+p.Y*m.M22+p.Z*m.M32,p.X*m.M13+p.Y*m.M23+p.Z*m.M33);
-        double length = std::sqrt(n.X*n.X+n.Y*n.Y+n.Z*n.Z);
+        auto length = ::RealMath::Sqrt(n.X*n.X+n.Y*n.Y+n.Z*n.Z);
         if (length <= 0) throw std::runtime_error("Authored model contains a zero-length transformed normal.");
         return ::float3(n.X/length,n.Y/length,n.Z/length);
     }
@@ -72,13 +72,13 @@ namespace helengine::android {
         __android_log_print(ANDROID_LOG_INFO,"HelengineAndroid","Authored model loaded: id=%s vertices=%zu indices=%zu.",data->get_Id().c_str(),model->Positions.size(),model->Indices.size());
         return model.release();
     }
-    ::RuntimeModel* AndroidRenderManager3D::BuildModelFromCooked(std::string path, ::IContentStreamSource* source) {
+    ::RuntimeModel* AndroidRenderManager3D::BuildModelFromCooked(HeCppString path, ::IContentStreamSource* source) {
         auto asset = ReadAsset(path,source);
         auto* model = he_cpp_try_cast<::ModelAsset>(asset.get());
         if (!model) throw std::runtime_error("Android cooked model must deserialize as ModelAsset.");
         auto* result = BuildModelFromRaw(model); model->Dispose(); return result;
     }
-    ::RuntimeMaterial* AndroidRenderManager3D::BuildMaterialFromCooked(std::string path, ::IContentStreamSource* source) {
+    ::RuntimeMaterial* AndroidRenderManager3D::BuildMaterialFromCooked(HeCppString path, ::IContentStreamSource* source) {
         if (!source || path.empty()) throw std::invalid_argument("Android material loading requires a content source and path.");
         std::unique_ptr<::Stream> stream(source->OpenRead(path));
         std::unique_ptr<::Asset> asset(::AssetSerializer::Deserialize(stream.get()));
@@ -126,7 +126,7 @@ namespace helengine::android {
             if (!Camera || !Camera->get_Parent()->get_IsHierarchyEnabled()) continue;
             const auto size = Renderer.GetExtent(); const auto normalized = Camera->get_Viewport();
             Viewport = {{static_cast<int32_t>(normalized.X*size.width),static_cast<int32_t>(normalized.Y*size.height)},
-                {static_cast<uint32_t>(normalized.Z*size.width),static_cast<uint32_t>(normalized.W*size.height)}};
+                {static_cast<uint32_t>(static_cast<int32_t>(normalized.Z*size.width)),static_cast<uint32_t>(static_cast<int32_t>(normalized.W*size.height))}};
             if (!Viewport.extent.width || !Viewport.extent.height) continue;
             if (ReportedViewport.width!=Viewport.extent.width || ReportedViewport.height!=Viewport.extent.height) {
                 ReportedViewport=Viewport.extent;
@@ -143,7 +143,7 @@ namespace helengine::android {
             {
                 SceneBatch batch{}; batch.WorldSpace=true; batch.BeginCamera=true;
                 batch.Viewport=Viewport; batch.ClearColor=clear.ClearColorEnabled; batch.ClearDepth=clear.ClearDepthEnabled;
-                batch.ClearValue[0]=clear.ClearColor.X; batch.ClearValue[1]=clear.ClearColor.Y; batch.ClearValue[2]=clear.ClearColor.Z; batch.ClearValue[3]=clear.ClearColor.W;
+                batch.ClearValue[0]=static_cast<float>(clear.ClearColor.X); batch.ClearValue[1]=static_cast<float>(clear.ClearColor.Y); batch.ClearValue[2]=static_cast<float>(clear.ClearColor.Z); batch.ClearValue[3]=static_cast<float>(clear.ClearColor.W);
                 batch.ClearDepthValue=clear.ClearDepth; Renderer.Submit(std::move(batch));
             }
             if (Camera->get_RenderQueue3D()) Camera->get_RenderQueue3D()->VisitOrdered(this);
@@ -161,13 +161,13 @@ namespace helengine::android {
             auto rotation=mesh->get_Parent()->get_LocalOrientation();
             auto position=mesh->get_Parent()->get_Position();
             __android_log_print(ANDROID_LOG_INFO,"HelengineAndroid","Authored mesh transform: draw=%d model=%s position=(%.4f,%.4f,%.4f) quaternion=(%.4f,%.4f,%.4f,%.4f).",
-                DrawCalls,model->get_Id().c_str(),position.X,position.Y,position.Z,rotation.X,rotation.Y,rotation.Z,rotation.W);
+                DrawCalls,model->get_Id().c_str(),static_cast<double>(position.X),static_cast<double>(position.Y),static_cast<double>(position.Z),static_cast<double>(rotation.X),static_cast<double>(rotation.Y),static_cast<double>(rotation.Z),static_cast<double>(rotation.W));
         }
         if (!::float4x4::TryInverseTranspose__ref0_out1(world,normal)) throw std::runtime_error("Authored mesh transform is not invertible.");
-        const double near = Camera->get_NearPlaneDistance(), far = Camera->get_FarPlaneDistance();
+        const auto near = Camera->get_NearPlaneDistance(), far = Camera->get_FarPlaneDistance();
         if (near <= 0 || far <= near) throw std::runtime_error("Authored camera clipping planes are invalid.");
-        const double f = 1/std::tan(Camera->get_FieldOfView()/2.0);
-        const double aspect = static_cast<double>(Viewport.extent.width)/Viewport.extent.height;
+        const auto f = 1/::RealMath::Tan(Camera->get_FieldOfView()/2.0);
+        const ::RealEvaluation aspect = ::RealEvaluation(Viewport.extent.width)/Viewport.extent.height;
         auto* ranges = model->get_Submeshes(); auto* materials = mesh->get_Materials();
         for (int32_t rangeIndex=0; rangeIndex<ranges->Length; ++rangeIndex) {
             if (!materials) throw std::runtime_error("Authored mesh material slots must be initialized.");
@@ -191,8 +191,11 @@ namespace helengine::android {
                 const auto color=material->Color;
                 const auto uv=model->TexCoords.empty() ? ::float2(0,0) : model->TexCoords[index];
                 SceneVertex vertex{{static_cast<float>(position.X*f/aspect),static_cast<float>(-position.Y*f),
-                    static_cast<float>((far/(near-far))*position.Z+near*far/(near-far)),-position.Z},
-                    {color.X,color.Y,color.Z,color.W},{uv.X,uv.Y},{worldPosition.X,worldPosition.Y,worldPosition.Z},{n.X,n.Y,n.Z}};
+                    static_cast<float>((far/(near-far))*position.Z+near*far/(near-far)),static_cast<float>(-position.Z)},
+                    {static_cast<float>(color.X),static_cast<float>(color.Y),static_cast<float>(color.Z),static_cast<float>(color.W)},
+                    {static_cast<float>(uv.X),static_cast<float>(uv.Y)},
+                    {static_cast<float>(worldPosition.X),static_cast<float>(worldPosition.Y),static_cast<float>(worldPosition.Z)},
+                    {static_cast<float>(n.X),static_cast<float>(n.Y),static_cast<float>(n.Z)}};
                 batch.Vertices.push_back(vertex);
             }
             Renderer.Submit(std::move(batch)); ++DrawCalls;
@@ -201,14 +204,15 @@ namespace helengine::android {
     void AndroidRenderManager3D::CaptureCameraLighting() {
         CameraLighting={};
         const auto position=Camera->get_Parent()->get_Position();
-        CameraLighting.Camera[0]=position.X; CameraLighting.Camera[1]=position.Y; CameraLighting.Camera[2]=position.Z;
+        CameraLighting.Camera[0]=static_cast<float>(position.X); CameraLighting.Camera[1]=static_cast<float>(position.Y); CameraLighting.Camera[2]=static_cast<float>(position.Z);
         auto* manager=get_OwnerCore()->get_ObjectManager();
         auto* ambient=manager->get_AmbientLights();
         for (int32_t index=0;index<ambient->get_Count();++index) {
             auto* light=(*ambient)[index];
             if (!light->get_Parent()->get_IsHierarchyEnabled()) continue;
             auto color=light->get_Color(); const auto intensity=light->get_Intensity();
-            CameraLighting.Ambient[0]+=color.X*intensity; CameraLighting.Ambient[1]+=color.Y*intensity; CameraLighting.Ambient[2]+=color.Z*intensity;
+            // SceneLighting is the fixed float32 Vulkan uniform block.
+            CameraLighting.Ambient[0]+=static_cast<float>(color.X*intensity); CameraLighting.Ambient[1]+=static_cast<float>(color.Y*intensity); CameraLighting.Ambient[2]+=static_cast<float>(color.Z*intensity);
         }
         int count=0;
         const int lightBudget=std::clamp(get_MaximumVisibleLights(),0,8);
@@ -219,11 +223,11 @@ namespace helengine::android {
             if (count>=lightBudget) break;
             const auto direction=::float4::RotateVector(::float3(0,0,-1),light->get_Parent()->get_Orientation());
             const auto color=light->get_Color(); const auto intensity=light->get_Intensity();
-            CameraLighting.LightPositions[count][0]=direction.X; CameraLighting.LightPositions[count][1]=direction.Y; CameraLighting.LightPositions[count][2]=direction.Z;
-            CameraLighting.LightColors[count][0]=color.X*intensity; CameraLighting.LightColors[count][1]=color.Y*intensity; CameraLighting.LightColors[count][2]=color.Z*intensity;
+            CameraLighting.LightPositions[count][0]=static_cast<float>(direction.X); CameraLighting.LightPositions[count][1]=static_cast<float>(direction.Y); CameraLighting.LightPositions[count][2]=static_cast<float>(direction.Z);
+            CameraLighting.LightColors[count][0]=static_cast<float>(color.X*intensity); CameraLighting.LightColors[count][1]=static_cast<float>(color.Y*intensity); CameraLighting.LightColors[count][2]=static_cast<float>(color.Z*intensity);
             if (count==0) {
-                CameraLighting.ShadowParameters[0]=get_ShadowsEnabled() && light->get_ShadowsEnabled()?1.0f:0.0f;
-                CameraLighting.ShadowParameters[1]=0.0005f; CameraLighting.ShadowParameters[3]=light->get_ShadowDistance();
+                CameraLighting.ShadowParameters[0]=static_cast<float>(get_ShadowsEnabled() && light->get_ShadowsEnabled()?1.0f:0.0f);
+                CameraLighting.ShadowParameters[1]=0.0005f; CameraLighting.ShadowParameters[3]=static_cast<float>(light->get_ShadowDistance());
             }
             ++count;
         }
@@ -233,9 +237,9 @@ namespace helengine::android {
             if (!light->get_Parent()->get_IsHierarchyEnabled()) continue;
             if (count>=lightBudget) break;
             const auto location=light->get_Parent()->get_Position(); const auto color=light->get_Color(); const auto intensity=light->get_Intensity();
-            CameraLighting.LightPositions[count][0]=location.X; CameraLighting.LightPositions[count][1]=location.Y; CameraLighting.LightPositions[count][2]=location.Z; CameraLighting.LightPositions[count][3]=1;
-            CameraLighting.LightColors[count][0]=color.X*intensity; CameraLighting.LightColors[count][1]=color.Y*intensity; CameraLighting.LightColors[count][2]=color.Z*intensity;
-            CameraLighting.LightParameters[count][0]=light->get_Range(); ++count;
+            CameraLighting.LightPositions[count][0]=static_cast<float>(location.X); CameraLighting.LightPositions[count][1]=static_cast<float>(location.Y); CameraLighting.LightPositions[count][2]=static_cast<float>(location.Z); CameraLighting.LightPositions[count][3]=1;
+            CameraLighting.LightColors[count][0]=static_cast<float>(color.X*intensity); CameraLighting.LightColors[count][1]=static_cast<float>(color.Y*intensity); CameraLighting.LightColors[count][2]=static_cast<float>(color.Z*intensity);
+            CameraLighting.LightParameters[count][0]=static_cast<float>(light->get_Range()); ++count;
         }
         auto* spots=manager->get_SpotLights();
         for (int32_t index=0;index<spots->get_Count();++index) {
@@ -244,12 +248,12 @@ namespace helengine::android {
             if (count>=lightBudget) break;
             const auto location=light->get_Parent()->get_Position(); const auto color=light->get_Color(); const auto intensity=light->get_Intensity();
             const auto direction=::float4::RotateVector(::float3(0,0,-1),light->get_Parent()->get_Orientation());
-            CameraLighting.LightPositions[count][0]=location.X; CameraLighting.LightPositions[count][1]=location.Y; CameraLighting.LightPositions[count][2]=location.Z; CameraLighting.LightPositions[count][3]=2;
-            CameraLighting.LightColors[count][0]=color.X*intensity; CameraLighting.LightColors[count][1]=color.Y*intensity; CameraLighting.LightColors[count][2]=color.Z*intensity;
-            CameraLighting.LightDirections[count][0]=direction.X; CameraLighting.LightDirections[count][1]=direction.Y; CameraLighting.LightDirections[count][2]=direction.Z;
-            CameraLighting.LightParameters[count][0]=light->get_Range();
-            CameraLighting.LightParameters[count][1]=std::cos(light->get_InnerConeAngleDegrees()*3.141592653589793/180.0);
-            CameraLighting.LightParameters[count][2]=std::cos(light->get_OuterConeAngleDegrees()*3.141592653589793/180.0); ++count;
+            CameraLighting.LightPositions[count][0]=static_cast<float>(location.X); CameraLighting.LightPositions[count][1]=static_cast<float>(location.Y); CameraLighting.LightPositions[count][2]=static_cast<float>(location.Z); CameraLighting.LightPositions[count][3]=2;
+            CameraLighting.LightColors[count][0]=static_cast<float>(color.X*intensity); CameraLighting.LightColors[count][1]=static_cast<float>(color.Y*intensity); CameraLighting.LightColors[count][2]=static_cast<float>(color.Z*intensity);
+            CameraLighting.LightDirections[count][0]=static_cast<float>(direction.X); CameraLighting.LightDirections[count][1]=static_cast<float>(direction.Y); CameraLighting.LightDirections[count][2]=static_cast<float>(direction.Z);
+            CameraLighting.LightParameters[count][0]=static_cast<float>(light->get_Range());
+            CameraLighting.LightParameters[count][1]=static_cast<float>(::RealMath::Cos(light->get_InnerConeAngleDegrees()*3.141592653589793/180.0));
+            CameraLighting.LightParameters[count][2]=static_cast<float>(::RealMath::Cos(light->get_OuterConeAngleDegrees()*3.141592653589793/180.0)); ++count;
         }
         CameraLighting.Options[2]=count;
     }

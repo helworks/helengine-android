@@ -28,9 +28,9 @@ namespace helengine::android {
         /// Stops and releases one backend-owned voice.
         void Stop(int32_t voiceId) override;
         /// Changes a linear mixer bus gain, including the master gain.
-        void SetBusGain(std::string busId,float gain) override;
+        void SetBusGain(HeCppString busId,float gain) override;
         /// Pauses or resumes voices routed through one mixer bus.
-        void SetBusPaused(std::string busId,bool paused) override;
+        void SetBusPaused(HeCppString busId,bool paused) override;
         /// Returns whether a voice is active or bus-paused.
         bool IsPlaying(int32_t voiceId) override;
         /// Reopens disconnected output, removes completed voices and reports fatal device failures on the engine thread.

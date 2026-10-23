@@ -129,7 +129,7 @@ namespace helengine::android {
         auto* scenes=Engine->get_SceneManager()->get_LoadedScenes();
         for (int32_t index=0;index<scenes->get_Count();++index) {
             if (index) activeScenes+=",";
-            activeScenes+=scenes->get_Item(index)->get_SceneId();
+            activeScenes+=scenes->get_Item(index)->get_SceneId().raw();
         }
         if (activeScenes!=ReportedScenes) {
             ReportedScenes=activeScenes;
@@ -145,7 +145,7 @@ namespace helengine::android {
                 if (viewport && viewport->get_ScalingMode()==::ViewportComponent::DensityScalingMode) {
                     auto bounds=viewport->get_ResolvedViewportSize();
                     __android_log_print(ANDROID_LOG_INFO,"HelengineAndroid","Shared viewport density: scale=%.3f authoredPixelsPerCm=%.3f uiScale=%.3f physical=%dx%d.",
-                        viewport->get_DensityScale(),viewport->get_PixelsPerCentimeter(),viewport->get_UiScale(),bounds.X,bounds.Y);
+                        static_cast<double>(viewport->get_DensityScale()),static_cast<double>(viewport->get_PixelsPerCentimeter()),static_cast<double>(viewport->get_UiScale()),bounds.X,bounds.Y);
                     break;
                 }
             }

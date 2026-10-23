@@ -19,7 +19,7 @@ namespace helengine::android {
         /// Decodes an engine texture into independently owned RGBA8 storage.
         ::RuntimeTexture* BuildTextureFromRaw(::TextureAsset* data) override;
         /// Deserializes a packaged texture through the configured content source.
-        ::RuntimeTexture* BuildTextureFromCooked(std::string path, ::IContentStreamSource* source) override;
+        ::RuntimeTexture* BuildTextureFromCooked(HeCppString path, ::IContentStreamSource* source) override;
         /// Visits one camera's ordered 2D queue within its pixel viewport.
         void DrawCamera(::ICamera* camera, VkRect2D viewport);
         /// Dispatches each generated drawable to its engine-owned drawing entry point.
@@ -36,13 +36,13 @@ namespace helengine::android {
             Array<uint8_t>* rgba8, int32_t sourceRowPitch) override;
     private:
         /// Appends a transformed textured quad to an existing batch.
-        void AppendQuad(SceneBatch& batch, ::Entity* parent, float x, float y, float width, float height, ::float4 source, ::byte4 color);
+        void AppendQuad(SceneBatch& batch, ::Entity* parent, ::RealEvaluation x, ::RealEvaluation y, ::RealEvaluation width, ::RealEvaluation height, ::float4 source, ::byte4 color);
         /// Converts a local UI coordinate to clip space using the parent transform and camera viewport.
-        SceneVertex Vertex(::Entity* parent, float x, float y, float u, float v, ::byte4 color);
+        SceneVertex Vertex(::Entity* parent, ::RealEvaluation x, ::RealEvaluation y, ::RealEvaluation u, ::RealEvaluation v, ::byte4 color);
         /// Attaches the current drawable's authored clipping intersection before submitting its geometry.
         void Submit(SceneBatch batch);
         /// Emits one convex rounded rectangle polygon, preserving per-corner radius selection.
-        void SubmitRoundedPolygon(::IRoundedRectDrawable2D* shape, float inset, ::byte4 color);
+        void SubmitRoundedPolygon(::IRoundedRectDrawable2D* shape, ::RealEvaluation inset, ::byte4 color);
         /// Vulkan batch sink shared with the 3D render manager.
         AndroidVulkanRenderer& Renderer;
         /// Active camera's pixel viewport for clip-space conversion and scissoring.

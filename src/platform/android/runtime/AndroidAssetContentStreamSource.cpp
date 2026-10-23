@@ -24,5 +24,5 @@ namespace helengine::android {
         }
         return normalized;
     }
-    ::Stream* AndroidAssetContentStreamSource::OpenRead(std::string assetPath) { return new AndroidAssetStream(Manager,NormalizePath(assetPath)); }
+    ::Stream* AndroidAssetContentStreamSource::OpenRead(HeCppString assetPath) { return new AndroidAssetStream(Manager,NormalizePath(assetPath.raw())); }
 }

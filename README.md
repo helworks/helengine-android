@@ -23,6 +23,8 @@ dotnet test .\helengine-android\builder.tests\helengine.android.builder.tests.cs
 
 The tests exercise platform discovery, editor selection, material parameters and texture dependencies, invalid asset paths, and rejection of exports without a generated core.
 
+When the builder is compiled outside the platform repository, set `HELENGINE_ANDROID_REPOSITORY_ROOT` to the absolute real Android source checkout. The override is validated before packaging; the installed `artifacts/builder` layout remains the fallback. `HELENGINE_BUILD_WORKSPACE_ROOT` selects the native and Gradle cache directories for editor/CLI builds. Direct `scripts/build-host.ps1` callers can supply `-NativeBuildRoot` and `-GradleCacheRoot` explicitly to keep native intermediates and caches in a chosen output location.
+
 ## Export an authored game
 
 Enable Android in the project, choose its startup scene and select the graphics option `screen-orientation` (`unspecified`, `portrait` or `landscape`). Landscape maps to Android's `sensorLandscape` activity setting. From the workspace root:
