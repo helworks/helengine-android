@@ -119,7 +119,7 @@ try {
     $env:GRADLE_USER_HOME = $cachePath
     $ErrorActionPreference = 'Continue'
     & (Join-Path $platformRoot "android/gradlew$batchSuffix") -p (Join-Path $platformRoot 'android') `
-        ':app:assembleDebug' --no-daemon --console=plain --project-cache-dir (Join-Path $shortBuildRoot 'gradle-project-cache') `
+        ':app:assembleDebug' --no-daemon --console=plain --no-problems-report --project-cache-dir (Join-Path $shortBuildRoot 'gradle-project-cache') `
         "-PhelengineBuildRoot=$gradleAppRoot" "-PhelengineNativeBuildRoot=$nativeBuildRoot" `
         "-PhelengineCoreRoot=$GeneratedCoreRoot" "-PhelengineContentRoot=$ContentRoot" "-PhelengineOrientation=$ScreenOrientation" *> $buildLog
     $buildExitCode = $LASTEXITCODE

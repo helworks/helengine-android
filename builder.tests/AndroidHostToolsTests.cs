@@ -50,6 +50,7 @@ public sealed class AndroidHostToolsTests {
         Assert.Equal(Path.Combine(fixture.Repository, "android", "gradle", "wrapper", "gradle-wrapper.jar"),
             Path.GetFullPath(Assert.Single(arguments, argument => argument.EndsWith("gradle-wrapper.jar", StringComparison.Ordinal))));
         Assert.Contains(":app:assembleDebug", arguments);
+        Assert.Contains("--no-problems-report", arguments);
         Assert.Contains("-PhelengineBuildRoot=" + Path.Combine(fixture.NativeRoot, "app"), arguments);
         Assert.Contains("fixture-java-exit-37", File.ReadAllText(Path.Combine(fixture.WorkingRoot, "gradle.log")));
         Assert.False(File.Exists(Path.Combine(fixture.OutputRoot, "host-build-report.json")));
